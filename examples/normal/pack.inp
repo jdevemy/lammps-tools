@@ -1,0 +1,13 @@
+tolerance 2.0 
+filetype xyz 
+output simbox.xyz
+add_box_sides 2.0 
+
+structure ethanol.xyz
+  number 360
+  inside box -15. -15. -15. 15. 15. 15. 
+end structure
+structure spce.xyz
+  number 360 
+  inside box -15. -15. -15. 15. 15. 15. 
+end structure

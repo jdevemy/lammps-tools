@@ -1,0 +1,54 @@
+# created by create_conf
+
+units real
+boundary p p p
+
+atom_style full
+bond_style harmonic
+angle_style harmonic
+dihedral_style opls
+special_bonds lj/coul 0.0 0.0 0.5
+
+pair_style lj/cut/coul/long 8.0 8.0
+pair_modify mix geometric tail yes
+kspace_style pppm 1.0e-4
+
+read_data data.lmp
+group gETHANOL molecule 1:360
+group gSPCE molecule 361:720
+
+neighbor 2.0 bin
+
+variable vNSTEPS equal 10000
+variable vNPRINT equal ${vNSTEPS}/100
+variable vNDUMP  equal ${vNSTEPS}/100
+
+variable vTEMP   equal 300.0
+variable vPRESS  equal 1.0
+
+velocity all create ${vTEMP} 12345
+
+fix fSHAKE all shake 0.0001 20 0 b 2 3 5 6
+
+thermo_style custom step cpu etotal ke temp pe ebond eangle edihed eimp evdwl ecoul elong press vol
+thermo ${vNPRINT}
+
+compute cMSD all msd
+fix fMSD all ave/time 1 1 ${vNDUMP} c_cMSD[1] c_cMSD[2] c_cMSD[3] c_cMSD[4] file lammps.msd
+compute cMSDETHANOL gETHANOL msd
+fix fMSDETHANOL all ave/time 1 1 ${vNDUMP} c_cMSDETHANOL[1] c_cMSDETHANOL[2] c_cMSDETHANOL[3] c_cMSDETHANOL[4] file ETHANOL_lammps.msd
+compute cMSDSPCE gSPCE msd
+fix fMSDSPCE all ave/time 1 1 ${vNDUMP} c_cMSDSPCE[1] c_cMSDSPCE[2] c_cMSDSPCE[3] c_cMSDSPCE[4] file SPCE_lammps.msd
+
+compute cRDF all rdf 100 1 1
+fix fRDF all ave/time 20 100 ${vNSTEPS} c_cRDF file lammps.rdf mode vector
+
+fix fNPT all npt temp ${vTEMP} ${vTEMP} 100.0 iso ${vPRESS} ${vPRESS} 500
+
+dump dCONF all custom ${vNDUMP} dump.lammpstrj id mol type element x y z ix iy iz xu yu zu
+dump_modify dCONF element C C H H O H H O
+
+timestep 1.0
+run ${vNSTEPS}
+
+write_data data_*.lmp

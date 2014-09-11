@@ -1,0 +1,66 @@
+#!/usr/bin/env python
+# -*- coding: iso-8859-1 -*-
+'''Use to convert .mol/.zmat to .xyz with CONNECT and IMPROPER'''
+
+import sys
+import os
+import logging
+from optparse import OptionParser
+
+import utilsscript
+import molecule
+
+def main():
+  '''Main function'''
+
+  usage = 'usage: %prog [options] INPUTFILE.mol/.zmat'
+  parser = OptionParser(usage=usage)
+  parser.set_defaults(verbosity=0, is_force=False, output_file=None)
+  parser.add_option('-v', '--verbose', dest='verbosity', \
+                    action='count', help='display more informations')
+  parser.add_option('-f', '--force', dest='is_force', \
+                    action='store_true', help='force overwrite files')
+
+  parser.add_option('-o', '--outputfile', dest='output_file', \
+                    help='output file (INPUTFILE.xyz)', metavar='OUTPUTFILE')
+
+  (options, args) = parser.parse_args()
+
+  ##########
+  # Manage options
+  # -v/--verbose
+  utilsscript.init_logging(options.verbosity)
+
+  if len(args) != 1:
+    parser.error('Invalid number of argument')
+
+  mol_file = args[0]
+  if not os.path.isfile(mol_file):
+    print >> sys.stderr, 'MOL/ZMAT file %s does not exist' % mol_file
+    sys.exit(2)
+  if not mol_file.endswith('.mol') and not mol_file.endswith('.zmat'):
+    parser.error('%s not a .mol or .zmat file' % mol_file)
+
+  mol = molecule.Molecule(mol_file, 'mol')
+
+  if not options.output_file:
+    if mol_file.endswith('.mol'):
+      output_file = mol_file.replace('.mol', '.xyz')
+    if mol_file.endswith('.zmat'):
+      output_file = mol_file.replace('.zmat', '.xyz')
+  else:
+    output_file = options.output_file
+  if os.path.isfile(output_file) and not options.is_force:
+    print >> sys.stderr, 'OUTPUT file %s already exists (use -f/--force to overwrite)' % output_file
+    sys.exit(2)
+
+  mol.write(output_file, 'xyz')
+
+  logging.info('File %s written', output_file)
+
+if __name__ == '__main__':
+  try:
+    main()
+  except KeyboardInterrupt:
+    sys.exit(1)
+

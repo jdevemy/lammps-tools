@@ -1,0 +1,70 @@
+#!/usr/bin/env python
+# -*- coding: iso-8859-1 -*-
+'''Use to fusion to .xyz for fep'''
+
+import sys
+import os
+import logging
+import argparse
+
+import utilsscript
+import molecule
+import ff
+
+def main():
+  '''Main function'''
+
+  parser = argparse.ArgumentParser(description='Script to fusion to .xyz')
+  parser.add_argument('-v', '--verbose', dest='verbosity', default=0, action='count', help='display more informations')
+  parser.add_argument('-f', '--force', dest='is_force', default=False, action='store_true', help='force overwrite files')
+  parser.add_argument('-o', '--outputfile', dest='output_file', help='output file [default: INPUTFILE1-INPUTFILE2.xyz]', metavar='OUTPUTFILE')
+  parser.add_argument(dest='input_file1', metavar='INPUTFILE1', help='input xyz file 1')
+  parser.add_argument(dest='input_file2', metavar='INPUTFILE2', help='input xyz file 2')
+  parser.add_argument(dest='ff_file', metavar='FFFILE', help='.ff file')
+
+  args = parser.parse_args()
+
+  ##########
+  # Manage options
+  # -v/--verbose
+  utilsscript.init_logging(args.verbosity)
+
+  if not os.path.isfile(args.input_file1):
+    print >> sys.stderr, 'XYZ file %s does not exist' % args.input_file1
+    sys.exit(2)
+  if not args.input_file1.endswith('.xyz'):
+    parser.error('%s not a .xyz file' % args.input_file1)
+  input_file1 = args.input_file1
+
+  if not os.path.isfile(args.input_file2):
+    print >> sys.stderr, 'XYZ file %s does not exist' % args.input_file2
+    sys.exit(2)
+  if not args.input_file2.endswith('.xyz'):
+    parser.error('%s not a .xyz file' % args.input_file2)
+  input_file2 = args.input_file2
+
+  if not os.path.isfile(args.ff_file):
+    print >> sys.stderr, 'FF file %s does not exist' % args.ff_file
+    sys.exit(2)
+  ff_ = ff.ForceField(args.ff_file)
+
+  if not args.output_file:
+    output_file = args.input_file1.replace('.xyz', '') + '-' + args.input_file2
+  else:
+    output_file = args.output_file
+  if os.path.isfile(output_file) and not args.is_force:
+    print >> sys.stderr, 'OUTPUT file %s already exists (use -f/--force to overwrite)' % output_file
+    sys.exit(2)
+
+  mol1 = molecule.Molecule(input_file1, 'xyz')
+  mol2 = molecule.Molecule(input_file2, 'xyz')
+  fmol = mol1.fusion(mol2, ff_)
+  fmol.write(output_file, 'xyz')
+  logging.info('File %s written', output_file)
+
+if __name__ == '__main__':
+  try:
+    main()
+  except KeyboardInterrupt:
+    sys.exit(1)
+
