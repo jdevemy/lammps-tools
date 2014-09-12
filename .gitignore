@@ -1,0 +1,10 @@
+*.o
+*.swp
+*.gz
+*.pyc
+.DS_Store
+.DS_Store?
+._*
+.~*
+Thumbs.db
+build
