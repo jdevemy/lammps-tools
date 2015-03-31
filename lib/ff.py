@@ -6,13 +6,14 @@ import logging
 class AtomFF(object):
   '''A force field for an atom'''
 
-  def __init__(self, atom_type, mass, charge, polarizability, field_type, par, comment=''):
+  def __init__(self, atom_type, mass, charge, polarizability, thole, field_type, par, comment=''):
 
     # Force field is lj or q (lj special case)
     self.atom_type = atom_type
     self.mass = mass
     self.charge = charge
     self.polarizability = polarizability
+    self.thole = thole
     self.field_type = field_type
     self.par = par
     self.comment = comment
@@ -20,12 +21,12 @@ class AtomFF(object):
     logging.debug('Add %s', self)
 
   def __str__(self):
-    return 'Atom FF %s %f %f %f %s %s %s' \
-      % (self.atom_type, self.mass, self.charge, self.polarizability, self.field_type, self.par, self.comment)
+    return 'Atom FF %s %f %f %f %f %s %s %s' \
+      % (self.atom_type, self.mass, self.charge, self.polarizability, self.thole, self.field_type, self.par, self.comment)
 
   def __eq__(self, other):
     return self.atom_type == other.atom_type and self.mass == other.mass and self.charge == other.charge \
-      and self.polarizability == other.polarizability and self.field_type == other.field_type
+      and self.polarizability == other.polarizability and self.thole == other.thole and self.field_type == other.field_type
 
   def __ne__(self, other):
     return not(self.__eq__(other))
@@ -156,7 +157,7 @@ class ForceField(object):
         except IndexError:
           comment = ''
 
-        self.atoms[atom_type] = AtomFF(atom_type, mass, charge, 0.0, 'lj', par, comment)
+        self.atoms[atom_type] = AtomFF(atom_type, mass, charge, 0.0, 0.0, 'lj', par, comment)
 
       if line.startswith('BOND'):
         par = {}
@@ -302,6 +303,10 @@ class ForceField(object):
             polarizability = float(line.split()[6 + shift])
           except (ValueError, IndexError):
             polarizability = 0.0
+          try:
+            thole = float(line.split()[7 + shift])
+          except (ValueError, IndexError):
+            thole = 0.0
         elif field_type == 'mart':
           par['sigma'] = float(line.split()[4 + shift])
           par['epsilon'] = float(line.split()[5 + shift])
@@ -309,6 +314,10 @@ class ForceField(object):
             polarizability = float(line.split()[6 + shift])
           except (ValueError, IndexError):
             polarizability = 0.0
+          try:
+            thole = float(line.split()[7 + shift])
+          except (ValueError, IndexError):
+            thole = 0.0
         elif field_type == 'q':
           par['sigma'] = 0.0
           par['epsilon'] = 0.0
@@ -317,6 +326,10 @@ class ForceField(object):
             polarizability = float(line.split()[6 + shift])
           except (ValueError, IndexError):
             polarizability = 0.0
+          try:
+            thole = float(line.split()[7 + shift])
+          except (ValueError, IndexError):
+            thole = 0.0
         elif field_type == 'nm':
           par['Eo'] = float(line.split()[4 + shift])
           par['n'] = float(line.split()[5 + shift])
@@ -326,6 +339,10 @@ class ForceField(object):
             polarizability = float(line.split()[8 + shift])
           except (ValueError, IndexError):
             polarizability = 0.0
+          try:
+            thole = float(line.split()[9 + shift])
+          except (ValueError, IndexError):
+            thole = 0.0
         elif field_type == 'buck':
           par['A'] = float(line.split()[4 + shift])
           par['rho'] = float(line.split()[5 + shift])
@@ -334,8 +351,12 @@ class ForceField(object):
             polarizability = float(line.split()[7 + shift])
           except (ValueError, IndexError):
             polarizability = 0.0
+          try:
+            thole = float(line.split()[8 + shift])
+          except (ValueError, IndexError):
+            thole = 0.0
 
-        self.atoms[atom_type] = AtomFF(atom_type, mass, charge, polarizability, field_type, par)
+        self.atoms[atom_type] = AtomFF(atom_type, mass, charge, polarizability, thole, field_type, par)
 
       elif current_section == 'TRANSLATION':
         atom_type1 = line.split()[0]

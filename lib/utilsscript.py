@@ -61,7 +61,7 @@ def close_multi():
   if pool is not None:
     pool.terminate()
 
-def init_mpi(func):
+def init_mpi(func_compute):
   '''Init MPI stuff, mainly for slaves'''
 
   if USE_MPI:
@@ -71,13 +71,13 @@ def init_mpi(func):
       logging.info('Slave %d: waiting', rank)
       # Main slave loop
       while True:
-        params = comm.recv(source=0, tag=42)
-        if params == None:
+        params_compute = comm.recv(source=0, tag=42)
+        if params_compute == None:
           logging.info('Slave %d: exiting', rank)
           MPI.Finalize()
           sys.exit(0)
         logging.info('Slave %d: start compute', rank)
-        result = func(*params)
+        result = func_compute(*params_compute)
         logging.info('Slave %d: end compute', rank)
         comm.send((comm.Get_rank(), result), dest=0, tag=43)
 
@@ -139,6 +139,23 @@ def manage_arg_list(list_):
 
   return (i_first, i_cnfs)
 
+def manage_id_list(ids):
+  '''Manage 1,2,3 1:5 list'''
+
+  ids_list = []
+  for el in ids.split(','):
+    if ':' in el:
+      istart = int(el.split(':')[0])
+      iend = int(el.split(':')[1])
+      if istart > iend or iend < 0 or istart < 0:
+        raise ValueError('Invalid ids')
+      ids_list += range(istart, iend + 1)
+    else:
+      if int(el) < 0:
+        raise ValueError('Invalid ids')
+      ids_list.append(int(el))
+  return tuple(ids_list)
+
 def key2str(key):
   '''Convert list of object to a string key'''
 
@@ -169,7 +186,8 @@ def key2str(key):
 
   return '__'.join(key_list)
 
-def compute(nb_proc, i_cnfs, dump, func, params, key=None):
+def compute(nb_proc, i_cnfs, dump, func_compute, params_compute, key=None, \
+            func_resreduce=None, params_resreduce=[], init_resreduce=None, func_endreduce=None, params_endreduce=[]):
   '''Main compute loop for conf analysis'''
 
   # Key is for persistent storage
@@ -203,12 +221,14 @@ def compute(nb_proc, i_cnfs, dump, func, params, key=None):
       is_mpi = True
       is_multi = False
       logging.info('Using MPI')
-      mpi_slaves = [ None ] * (comm.Get_size() - 1)
+      mpi_slaves = [None] * (comm.Get_size() - 1)
 
   if is_multi:
     init_multi(nb_proc)
 
   results = []
+
+  final_result = init_resreduce
 
   persist_results = {}
 
@@ -237,21 +257,26 @@ def compute(nb_proc, i_cnfs, dump, func, params, key=None):
 
     # Main compute
     if is_persist and cnf_key in pers_data:
+      # Get from persist
       logging.info('Result for conf %s get from persistent', cnf_key)
       result = pers_data[cnf_key]
     else:
+
+      # Multiprocessor case
       if is_multi:
-        result = pool.apply_async(func, [cnf] + params, callback=task_done)
+        result = pool.apply_async(func_compute, [cnf] + params_compute, callback=task_done)
         # Store the waiting result to put it when ready to persist
         if is_persist:
           persist_results[cnf_key] = result
         task_launch()
+
+      # MPI case
       elif is_mpi:
         for i in xrange(len(mpi_slaves)):
           # Get the first free slave and send it the cnf
           if mpi_slaves[i] == None:
             mpi_slaves[i] = cnf_key
-            comm.send([cnf] + params, dest=i + 1, tag=42)
+            comm.send([cnf] + params_compute, dest=i + 1, tag=42)
             logging.info('Task %s sent to slave %d', i_cnf, i + 1)
             # Put a fake result
             result = 'SLAVE_%d' % (i + 1)
@@ -259,6 +284,7 @@ def compute(nb_proc, i_cnfs, dump, func, params, key=None):
 
         nb_free_slaves = mpi_slaves.count(None)
         logging.info('%d free slaves', nb_free_slaves)
+
         # If no more free slaves, waiting for (any) result
         if nb_free_slaves == 0:
           (rank, slave_result) = comm.recv(source=-1, tag=43)
@@ -281,8 +307,10 @@ def compute(nb_proc, i_cnfs, dump, func, params, key=None):
             persist.sync()
 
           mpi_slaves[rank - 1] = None
+
+      # Sequential case
       else:
-        result = func(cnf, *params)
+        result = func_compute(cnf, *params_compute)
         if is_persist:
           logging.info('Result for conf %s store on persistent', cnf_key)
           pers_data[cnf_key] = result
@@ -291,26 +319,43 @@ def compute(nb_proc, i_cnfs, dump, func, params, key=None):
 
     results.append(result)
 
-    # Check if some procesors have failed with an exception
     if is_multi:
+      # Check if some procesors have failed with an exception
       for result in results:
         if isinstance(result, multiprocessing.pool.ApplyResult) and result.ready() and not result.successful():
           logging.critical('An exception occured on one conf, exit !')
           raise KeyboardInterrupt
 
-    # Check if some persist parallel results are already ready
-    if is_persist and is_multi:
-      keys2del = []
-      for (cnf_key, result) in persist_results.items():
-        # If a result is ready, put it in persist
-        if result.ready():
-          logging.info('Result for conf %s store on persistent', cnf_key)
-          pers_data[cnf_key] = result.get()
-          persist[key_str] = pers_data
-          persist.sync()
-          keys2del.append(cnf_key)
-      for cnf_key in keys2del:
-        del persist_results[cnf_key]
+      # Check if some persist parallel results are already ready
+      if is_persist:
+        keys2del = []
+        for (cnf_key, result) in persist_results.items():
+          # If a result is ready, put it in persist
+          if result.ready():
+            logging.info('Result for conf %s store on persistent', cnf_key)
+            pers_data[cnf_key] = result.get()
+            persist[key_str] = pers_data
+            persist.sync()
+            keys2del.append(cnf_key)
+        for cnf_key in keys2del:
+          del persist_results[cnf_key]
+
+    # Try to pre-reduce to reduce memory usage
+    if func_resreduce:
+      res2remove = []
+      for result in results:
+        if is_multi:
+          if result.ready():
+            ze_result = result.get()
+          else:
+            continue
+        else:
+          ze_result = result
+        final_result = func_resreduce(final_result, [ze_result], *params_resreduce)
+        res2remove.append(result)
+      # Remove reduced results
+      for res in res2remove:
+        results.remove(res)
 
     # Get i for next conf
     try:
@@ -363,19 +408,29 @@ def compute(nb_proc, i_cnfs, dump, func, params, key=None):
         final_results.append(result)
     results = final_results
 
-  # Store last parallel results in persist
-  if is_persist and is_multi:
-    keys2del = []
-    for (cnf_key, result) in persist_results.items():
-      # If a result is ready, put it in persist
-      if result.ready():
-        logging.info('Result for conf %s store on persistent', cnf_key)
-        pers_data[cnf_key] = result.get()
-        persist[key_str] = pers_data
-        persist.sync()
-        keys2del.append(cnf_key)
-    for cnf_key in keys2del:
-      del persist_results[cnf_key]
+    # Store last parallel results in persist
+    if is_persist:
+      keys2del = []
+      for (cnf_key, result) in persist_results.items():
+        # If a result is ready, put it in persist
+        if result.ready():
+          logging.info('Result for conf %s store on persistent', cnf_key)
+          pers_data[cnf_key] = result.get()
+          persist[key_str] = pers_data
+          persist.sync()
+          keys2del.append(cnf_key)
+      for cnf_key in keys2del:
+        del persist_results[cnf_key]
+
+  # Reduce if needed
+  if func_resreduce:
+    final_result = func_resreduce(final_result, results, *params_resreduce)
+  else:
+    final_result = results
+
+  # Apply end reduce
+  if func_endreduce:
+    final_result = func_endreduce(final_result, nb_cnf, *params_endreduce)
 
   if is_persist:
     logging.debug('Persist content for key %s : %s', key_str, persist[key_str])
@@ -383,4 +438,4 @@ def compute(nb_proc, i_cnfs, dump, func, params, key=None):
 
   logging.info('%d conf analysed', nb_cnf)
 
-  return (nb_cnf, results)
+  return (nb_cnf, final_result)

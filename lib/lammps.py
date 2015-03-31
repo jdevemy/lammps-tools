@@ -44,6 +44,7 @@ class Data(object):
     self.angles = []
     self.dihedrals = []
     self.impropers = []
+    self.extras = []
 
     self.atom_types = []
     self.bond_types = []
@@ -61,6 +62,221 @@ class Data(object):
       self.filename = filename
     else:
       self.filename = None
+
+  def add_atom_type(self, mass, coeffs, comment):
+    '''Add an atom type to the end of the list'''
+
+    i = len(self.atom_types) + 1
+    atom_type = {'i': i, 'mass': mass, 'coeffs': coeffs, 'comment': comment}
+    self.atom_types.append(atom_type)
+    return i
+
+  def add_bond_type(self, coeffs, comment, atom_names=None):
+    '''Add a bond type to the end of the list'''
+
+    i = len(self.bond_types) + 1
+    bond_type = {'i': i, 'atom_names': atom_names, 'coeffs': coeffs, 'comment': comment}
+    self.bond_types.append(bond_type)
+    return i
+
+  def add_angle_type(self, coeffs, comment, atom_names=None):
+    '''Add an angle type to the end of the list'''
+
+    i = len(self.angle_types) + 1
+    angle_type = {'i': i, 'atom_names': atom_names, 'coeffs': coeffs, 'comment': comment}
+    self.angle_types.append(angle_type)
+    return i
+
+  def add_dihedral_type(self, coeffs, comment, style=None, atom_names=None, is_improper=False):
+    '''Add a dihedral type to the end of the list'''
+
+    i = len(self.dihedral_types) + 1
+    dihedral_type = {'i': i, 'atom_names': atom_names, 'coeffs': coeffs, 'comment': comment, 'style': style, 'is_improper': is_improper}
+    self.dihedral_types.append(dihedral_type)
+    return i
+
+  def add_improper_type(self, coeffs, comment, atom_names=None):
+    '''Add a improper type to the end of the list'''
+
+    i = len(self.improper_types) + 1
+    improper_type = {'i': i, 'atom_names': atom_names, 'coeffs': coeffs, 'comment': comment}
+    self.improper_types.append(improper_type)
+    return i
+
+  def add_atom(self, x, y, z, mol_i, charge, mass=None, comment=None, i=None, atom_type=None):
+    '''Add an atom in the list, by getting the type'''
+
+    if atom_type is None:
+      right_atom_type = None
+      # Search for the right type
+      for atom_type in self.atom_types:
+        if atom_type['mass'] == mass and atom_type['comment'] == comment:
+          right_atom_type = atom_type
+          break
+
+      if right_atom_type is None:
+        raise ValueError('Atom type not found for atom %s' % comment)
+    else:
+      right_atom_type = atom_type
+
+    if i is None:
+      i = len(self.atoms) + 1
+    atom = {'i': i, 'mol_i': mol_i, 'atom_type_i': right_atom_type['i'], 'atom_type': right_atom_type, \
+            'charge': charge, 'x': x, 'y': y, 'z': z, 'comment': comment}
+    try:
+      self.atoms[i - 1] = atom
+    except IndexError:
+      # There are holes in the list, grow list (holes will be None and will be removed after)
+      self.atoms.extend([None] * (i - len(self.atoms)))
+      self.atoms[i - 1] = atom
+    return i
+
+  def add_bond(self, atom_is, comment=None, atom_names=None, i=None, bond_type=None):
+    '''Add a bond in the list, by getting the type'''
+
+    if bond_type is None:
+      right_bond_type = None
+      # Search for the right type
+      for bond_type in self.bond_types:
+        if bond_type['atom_names'] == atom_names or bond_type['atom_names'] == (atom_names[1], atom_names[0]):
+          right_bond_type = bond_type
+          break
+      if right_bond_type is None:
+        raise ValueError('Bond type not found for bond %s' % comment)
+    else:
+      right_bond_type = bond_type
+
+    atom1 = self.atoms[atom_is[0] - 1]
+    atom2 = self.atoms[atom_is[1] - 1]
+
+    if i is None:
+      i = len(self.bonds) + 1
+    bond = {'i': i, 'bond_type_i': right_bond_type['i'], 'bond_type': right_bond_type, \
+            'atom1': atom1, 'atom2': atom2, 'comment': comment}
+    try:
+      self.bonds[i - 1] = bond
+    except IndexError:
+      # There are holes in the list, grow list (holes will be None and will be removed after)
+      self.bonds.extend([None] * (i - len(self.bonds)))
+      self.bonds[i - 1] = bond
+    return i
+
+  def add_angle(self, atom_is, comment=None, atom_names=None, i=None, angle_type=None):
+    '''Add an angle in the list, by getting the type'''
+
+    if angle_type is None:
+      right_angle_type = None
+      # Search for the right type
+      for angle_type in self.angle_types:
+        if angle_type['atom_names'] == atom_names or angle_type['atom_names'] == (atom_names[2], atom_names[1], atom_names[0]):
+          right_angle_type = angle_type
+          break
+
+      if right_angle_type is None:
+        raise ValueError('Angle type not found for angle %s' % comment)
+    else:
+      right_angle_type = angle_type
+
+    atom1 = self.atoms[atom_is[0] - 1]
+    atom2 = self.atoms[atom_is[1] - 1]
+    atom3 = self.atoms[atom_is[2] - 1]
+
+    if i is None:
+      i = len(self.angles) + 1
+    angle = {'i': i, 'angle_type_i': right_angle_type['i'], 'angle_type': right_angle_type, \
+             'atom1': atom1, 'atom2': atom2, 'atom3': atom3, 'comment': comment}
+    try:
+      self.angles[i - 1] = angle
+    except IndexError:
+      # There are holes in the list, grow list (holes will be None and will be removed after)
+      self.angles.extend([None] * (i - len(self.angles)))
+      self.angles[i - 1] = angle
+    return i
+
+  def add_dihedral(self, atom_is, comment=None, atom_names=None, i=None, dihedral_type=None, is_improper=False):
+    '''Add an dihedral in the list, by getting the type'''
+
+    if dihedral_type is None:
+      right_dihedral_type = None
+      # Search for the right type
+      for dihedral_type in self.dihedral_types:
+        if (dihedral_type['atom_names'] == atom_names or dihedral_type['atom_names'] == (atom_names[3], atom_names[2], atom_names[1], atom_names[0])) and \
+           dihedral_type['is_improper'] == is_improper:
+          right_dihedral_type = dihedral_type
+          break
+
+      if right_dihedral_type is None:
+        raise ValueError('Dihedral type not found for dihedral %s' % comment)
+    else:
+      right_dihedral_type = dihedral_type
+
+    atom1 = self.atoms[atom_is[0] - 1]
+    atom2 = self.atoms[atom_is[1] - 1]
+    atom3 = self.atoms[atom_is[2] - 1]
+    atom4 = self.atoms[atom_is[3] - 1]
+
+    if i is None:
+      i = len(self.dihedrals) + 1
+    dihedral = {'i': i, 'dihedral_type_i': right_dihedral_type['i'], 'dihedral_type': right_dihedral_type, \
+                'atom1': atom1, 'atom2': atom2, 'atom3': atom3, 'atom4': atom4, 'comment': comment}
+    try:
+      self.dihedrals[i - 1] = dihedral
+    except IndexError:
+      # There are holes in the list, grow list (holes will be None and will be removed after)
+      self.dihedrals.extend([None] * (i - len(self.dihedrals)))
+      self.dihedrals[i - 1] = dihedral
+    return i
+
+  def add_improper(self, atom_is, comment=None, atom_names=None, i=None, improper_type=None):
+    '''Add an improper in the list, by getting the type'''
+
+    if improper_type is None:
+      right_improper_type = None
+      # Search for the right type
+      for improper_type in self.improper_types:
+        if improper_type['atom_names'] == atom_names or improper_type['atom_names'] == (atom_names[2], atom_names[1], atom_names[0]):
+          right_improper_type = improper_type
+          break
+
+      if right_improper_type is None:
+        raise ValueError('Improper type not found for improper %s' % comment)
+    else:
+      right_improper_type = improper_type
+
+    atom1 = self.atoms[atom_is[0] - 1]
+    atom2 = self.atoms[atom_is[1] - 1]
+    atom3 = self.atoms[atom_is[2] - 1]
+    atom4 = self.atoms[atom_is[3] - 1]
+
+    if i is None:
+      i = len(self.impropers) + 1
+    improper = {'i': i, 'improper_type_i': right_improper_type['i'], 'improper_type': right_improper_type, \
+                'atom1': atom1, 'atom2': atom2, 'atom3': atom3, 'atom4': atom4, 'comment': comment}
+    try:
+      self.impropers[i - 1] = improper
+    except IndexError:
+      # There are holes in the list, grow list (holes will be None and will be removed after)
+      self.impropers.extend([None] * (i - len(self.impropers)))
+      self.impropers[i - 1] = improper
+    return i
+
+  def add_extra(self, fmt, values, comment=None, i=None):
+    '''Add some infor for the extra part'''
+
+    tokens = []
+    for (f, value) in zip(fmt, values):
+      tokens.append(f % value)
+
+    if i is None:
+      i = len(self.extras) + 1
+    extra = {'i': i, 'line': ' '.join(tokens), 'comment': comment}
+    try:
+      self.extras[i - 1] = extra
+    except IndexError:
+      # There are holes in the list, grow list (holes will be None and will be removed after)
+      self.extras.extend([None] * (i - len(self.extras)))
+      self.extras[i - 1] = extra
+    return i
 
   def read_from_file(self, filename='lammps.data'):
 
@@ -88,29 +304,35 @@ class Data(object):
       if line == '':
         continue
 
+      keyword = line.split('#')[0].strip()
+
       # Section change
-      if line == 'Masses' or line == 'Pair Coeffs' or line == 'Bond Coeffs' or line == 'Angle Coeffs' or line == 'Dihedral Coeffs' or line == 'Improper Coeffs' or \
-         line == 'Atoms' or line == 'Bonds' or line == 'Angles' or line == 'Dihedrals' or line == 'Impropers' or line == 'Velocities' or line == 'Extras' or line == 'EXTRA':
-        section = line
+      if keyword == 'Masses' or keyword == 'Pair Coeffs' or keyword == 'Bond Coeffs' or keyword == 'Angle Coeffs' or keyword == 'Dihedral Coeffs' or keyword == 'Improper Coeffs' or \
+         keyword == 'Atoms' or keyword == 'Bonds' or keyword == 'Angles' or keyword == 'Dihedrals' or keyword == 'Impropers' or keyword == 'Velocities' or keyword == 'Extras' or keyword == 'EXTRA':
+        section = keyword
         continue
 
       # Header
       if section == 'Header':
         if 'atoms' in line:
           nb_atoms = int(line.split()[0])
-          self.atoms = [ None ] * nb_atoms
+          self.atoms = [None] * nb_atoms
           continue
         if 'bonds' in line:
           nb_bonds = int(line.split()[0])
+          self.bonds = [None] * nb_bonds
           continue
         if 'angles' in line:
           nb_angles = int(line.split()[0])
+          self.angles = [None] * nb_angles
           continue
         if 'dihedrals' in line:
           nb_dihedrals = int(line.split()[0])
+          self.dihedrals = [None] * nb_dihedrals
           continue
         if 'impropers' in line:
           nb_impropers = int(line.split()[0])
+          self.impropers = [None] * nb_impropers
           continue
 
         if 'atom types' in line:
@@ -143,20 +365,16 @@ class Data(object):
           continue
 
       # Masses
-      #TODO should I append or use i ? If the lines are not sorted ???
       if section == 'Masses':
         i = int(line.split()[0])
         mass = float(line.split()[1])
 
-        # Should I create atoms dict ?
-        if len(self.atom_types) < nb_atom_types:
-          atom_type = {}
-          atom_type['mass'] = mass
-          self.atom_types.append(atom_type)
+        if '#' in line:
+          comment = line.split('#')[1].strip()
         else:
-          atom_type = self.atom_types[i - 1]
-          atom_type['mass'] = mass
-        continue
+          comment = None
+        # Coeffs are not set yet
+        self.add_atom_type(mass, None, comment)
 
       # Pair Coeffs
       if section == 'Pair Coeffs':
@@ -170,15 +388,8 @@ class Data(object):
           except ValueError:
             break
 
-        # Should I create atoms dict ?
-        if len(self.atom_types) < nb_atom_types:
-          atom_type = {}
-          atom_type['coeffs'] = coeffs
-          self.atom_types.append(atom_type)
-        else:
-          atom_type = self.atom_types[i - 1]
-          atom_type['coeffs'] = coeffs
-        continue
+        atom_type = self.atom_types[i - 1]
+        atom_type['coeffs'] = coeffs
 
       # Bond Coeffs
       if section == 'Bond Coeffs':
@@ -191,7 +402,11 @@ class Data(object):
             coeffs.append(coeff)
           except ValueError:
             break
-        self.bond_types.append({'coeffs': coeffs})
+        if '#' in line:
+          comment = line.split('#')[1].strip()
+        else:
+          comment = None
+        self.add_bond_type(coeffs, comment)
 
       # Angle Coeffs
       if section == 'Angle Coeffs':
@@ -204,7 +419,11 @@ class Data(object):
             coeffs.append(coeff)
           except ValueError:
             break
-        self.angle_types.append({'coeffs': coeffs})
+        if '#' in line:
+          comment = line.split('#')[1].strip()
+        else:
+          comment = None
+        self.add_angle_type(coeffs, comment)
 
       # Dihedral Coeffs
       if section == 'Dihedral Coeffs':
@@ -217,7 +436,11 @@ class Data(object):
             coeffs.append(coeff)
           except ValueError:
             break
-        self.dihedral_types.append({'coeffs': coeffs})
+        if '#' in line:
+          comment = line.split('#')[1].strip()
+        else:
+          comment = None
+        self.add_dihedral_type(coeffs, comment)
 
       # Improper Coeffs
       if section == 'Improper Coeffs':
@@ -230,7 +453,11 @@ class Data(object):
             coeffs.append(coeff)
           except ValueError:
             break
-        self.improper_types.append({'coeffs': coeffs})
+        if '#' in line:
+          comment = line.split('#')[1].strip()
+        else:
+          comment = None
+        self.add_improper_type(coeffs, comment)
 
       # Atoms
       #TODO assume atom_style is full
@@ -242,20 +469,14 @@ class Data(object):
         x = float(line.split()[4])
         y = float(line.split()[5])
         z = float(line.split()[6])
+        if '#' in line:
+          comment = line.split('#')[1].strip()
+        else:
+          comment = None
 
-        atom = {}
-        atom['i'] = i
-        atom['mol_i'] = mol_i
+        self.add_atom(x, y, z, mol_i, charge, comment=comment, i=i, atom_type=self.atom_types[atom_type_i - 1])
         if mol_i > nb_mols:
           nb_mols = mol_i
-        atom['atom_type_i'] = atom_type_i
-        atom['atom_type'] = self.atom_types[atom_type_i - 1]
-        atom['charge'] = charge
-        atom['x'] = x
-        atom['y'] = y
-        atom['z'] = z
-        # Atoms are not ordered
-        self.atoms[i - 1] = atom
 
       # Bonds
       if section == 'Bonds':
@@ -263,12 +484,12 @@ class Data(object):
         bond_type_i = int(line.split()[1])
         atom1_i = int(line.split()[2])
         atom2_i = int(line.split()[3])
+        if '#' in line:
+          comment = line.split('#')[1].strip()
+        else:
+          comment = None
 
-        bond = {}
-        bond['bond_type'] = self.bond_types[bond_type_i - 1]
-        bond['atom1'] = self.atoms[atom1_i - 1]
-        bond['atom2'] = self.atoms[atom2_i - 1]
-        self.bonds.append(bond)
+        self.add_bond((atom1_i, atom2_i), comment=comment, i=i, bond_type=self.bond_types[bond_type_i - 1])
 
       # Angles
       if section == 'Angles':
@@ -277,13 +498,12 @@ class Data(object):
         atom1_i = int(line.split()[2])
         atom2_i = int(line.split()[3])
         atom3_i = int(line.split()[4])
+        if '#' in line:
+          comment = line.split('#')[1].strip()
+        else:
+          comment = None
 
-        angle = {}
-        angle['angle_type'] = self.angle_types[angle_type_i - 1]
-        angle['atom1'] = self.atoms[atom1_i - 1]
-        angle['atom2'] = self.atoms[atom2_i - 1]
-        angle['atom3'] = self.atoms[atom3_i - 1]
-        self.angles.append(angle)
+        self.add_angle((atom1_i, atom2_i, atom3_i), comment=comment, i=i, angle_type=self.angle_types[angle_type_i - 1])
 
       # Dihedrals
       if section == 'Dihedrals':
@@ -293,14 +513,12 @@ class Data(object):
         atom2_i = int(line.split()[3])
         atom3_i = int(line.split()[4])
         atom4_i = int(line.split()[5])
+        if '#' in line:
+          comment = line.split('#')[1].strip()
+        else:
+          comment = None
 
-        dihedral = {}
-        dihedral['dihedral_type'] = self.dihedral_types[dihedral_type_i - 1]
-        dihedral['atom1'] = self.atoms[atom1_i - 1]
-        dihedral['atom2'] = self.atoms[atom2_i - 1]
-        dihedral['atom3'] = self.atoms[atom3_i - 1]
-        dihedral['atom4'] = self.atoms[atom4_i - 1]
-        self.dihedrals.append(dihedral)
+        self.add_dihedral((atom1_i, atom2_i, atom3_i, atom4_i), comment=comment, i=i, dihedral_type=self.dihedral_types[dihedral_type_i - 1])
 
       # Impropers
       if section == 'Impropers':
@@ -310,21 +528,75 @@ class Data(object):
         atom2_i = int(line.split()[3])
         atom3_i = int(line.split()[4])
         atom4_i = int(line.split()[5])
+        if '#' in line:
+          comment = line.split('#')[1].strip()
+        else:
+          comment = None
 
-        improper = {}
-        improper['improper_type'] = self.improper_types[improper_type_i - 1]
-        improper['atom1'] = self.atoms[atom1_i - 1]
-        improper['atom2'] = self.atoms[atom2_i - 1]
-        improper['atom3'] = self.atoms[atom3_i - 1]
-        improper['atom4'] = self.atoms[atom4_i - 1]
-        self.impropers.append(improper)
+        self.add_improper((atom1_i, atom2_i, atom3_i, atom4_i), comment=comment, i=i, improper_type=self.improper_types[improper_type_i - 1])
 
-      # TODO ignore Velocities and Extra
+      # Velocities
+      if section == 'Velocities':
+        i = int(line.split()[0])
+        vx = float(line.split()[1])
+        vy = float(line.split()[2])
+        vz = float(line.split()[3])
+        self.atoms[i-1]['velocities'] = (vx, vy, vz)
+
+      # Extra
+      if section == 'EXTRA' or section == 'Extras':
+        i = int(line.split()[0])
+        # Get extra fields
+        extra = line.split(None, 1)[1]
+        if '#' in line:
+          extra = extra.split('#')[0].strip()
+        extras = [ float(e) for e in extra.split() ]
+        self.atoms[i-1]['extras'] = tuple(extras)
 
     f.close()
 
+    # Remove holes (None)
     if None in self.atoms:
+      tmp_atoms = self.atoms
+      self.atoms = [atom for atom in tmp_atoms if atom is not None]
+    if None in self.bonds:
+      tmp_bonds = self.bonds
+      self.bonds = [bond for bond in tmp_bonds if bond is not None]
+    if None in self.angles:
+      tmp_angles = self.angles
+      self.angles = [angle for angle in tmp_angles if angle is not None]
+    if None in self.dihedrals:
+      tmp_dihedrals = self.dihedrals
+      self.dihedrals = [dihedral for dihedral in tmp_dihedrals if dihedral is not None]
+    if None in self.impropers:
+      tmp_impropers = self.impropers
+      self.impropers = [improper for improper in tmp_impropers if improper is not None]
+    if None in self.extras:
+      tmp_extras = self.extras
+      self.extras = [extra for extra in tmp_extras if extra is not None]
+
+    # Validate nbs
+    if len(self.atoms) != nb_atoms:
       raise ValueError('Nb of atoms is not coherent')
+    if len(self.bonds) != nb_bonds:
+      raise ValueError('Nb of bonds is not coherent')
+    if len(self.angles) != nb_angles:
+      raise ValueError('Nb of angles is not coherent')
+    if len(self.dihedrals) != nb_dihedrals:
+      raise ValueError('Nb of dihedrals is not coherent')
+    if len(self.impropers) != nb_impropers:
+      raise ValueError('Nb of impropers is not coherent')
+
+    if len(self.atom_types) != nb_atom_types:
+      raise ValueError('Nb of atom types is not coherent')
+    if len(self.bond_types) != nb_bond_types:
+      raise ValueError('Nb of bond types is not coherent')
+    if len(self.angle_types) != nb_angle_types:
+      raise ValueError('Nb of angle types is not coherent')
+    if len(self.dihedral_types) != nb_dihedral_types:
+      raise ValueError('Nb of dihedral types is not coherent')
+    if len(self.improper_types) != nb_improper_types:
+      raise ValueError('Nb of improper types is not coherent')
 
     # Reconstruct mols
     self.mols = []
@@ -338,7 +610,199 @@ class Data(object):
         mol['atoms'] = []
       mol['atoms'].append(atom)
       atom['mol'] = mol
-      del atom['mol_i']
+
+  def write_to_file(self, filename='lammps.data'):
+    '''Write the data to a file'''
+
+    # For stdout writing
+    if isinstance(filename, file):
+      f = filename
+    else:
+      f = open(filename, 'w')
+
+    # Header
+    f.write('%s\n\n' % self.header)
+    f.write('%d atoms\n' % len(self.atoms))
+    if len(self.bonds) > 0:
+      f.write('%d bonds\n' % len(self.bonds))
+    if len(self.angles) > 0:
+      f.write('%d angles\n' % len(self.angles))
+    if len(self.dihedrals) > 0:
+      f.write('%d dihedrals\n' % len(self.dihedrals))
+    if len(self.impropers) > 0:
+      f.write('%d impropers\n' % len(self.impropers))
+    f.write('\n')
+
+    f.write('%d atom types\n' % len(self.atom_types))
+    if len(self.bond_types) > 0:
+      f.write('%d bond types\n' % len(self.bond_types))
+    if len(self.angle_types) > 0:
+      f.write('%d angle types\n' % len(self.angle_types))
+    if len(self.dihedral_types) > 0:
+      f.write('%d dihedral types\n' % len(self.dihedral_types))
+    if len(self.improper_types) > 0:
+      f.write('%d improper types\n' % len(self.improper_types))
+    f.write('\n')
+
+    f.write('%f %f xlo xhi\n' % self.box[0])
+    f.write('%f %f ylo yhi\n' % self.box[1])
+    f.write('%f %f zlo zhi\n' % self.box[2])
+    if self.tilt != (0, 0, 0):
+      f.write('%f %f %f xy xz yz\n' % self.tilt)
+    f.write('\n')
+
+    # Masses
+    f.write('Masses\n\n')
+    i = 0
+    for atom_type in self.atom_types:
+      i += 1
+      if 'comment' in atom_type and atom_type['comment'] is not None:
+        f.write('%4d %9.4f # %s\n' % (i, atom_type['mass'], atom_type['comment']))
+      else:
+        f.write('%4d %9.4f\n' % (i, atom_type['mass']))
+    f.write('\n')
+
+    # Pair Coeffs
+    # Check if the pair_coeffs have to be written here
+    if None not in [atom_type['coeffs'] for atom_type in self.atom_types]:
+      f.write('Pair Coeffs\n\n')
+      i = 0
+      for atom_type in self.atom_types:
+        i += 1
+        coeffs_str = ' '.join(['%9.4f' % coeff for coeff in atom_type['coeffs']])
+        if 'comment' in atom_type and atom_type['comment'] is not None:
+          f.write('%4d %s # %s\n' % (i, coeffs_str, atom_type['comment']))
+        else:
+          f.write('%4d %s\n' % (i, coeffs_str))
+      f.write('\n')
+
+    # Bond Coeffs
+    if self.bond_types != []:
+      f.write('Bond Coeffs\n\n')
+      i = 0
+      for bond_type in self.bond_types:
+        i += 1
+        coeffs_str = ' '.join(['%9.4f' % coeff for coeff in bond_type['coeffs']])
+        if 'comment' in bond_type and bond_type['comment'] is not None:
+          f.write('%4d %s # %s\n' % (i, coeffs_str, bond_type['comment']))
+        else:
+          f.write('%4d %s\n' % (i, coeffs_str))
+      f.write('\n')
+
+    # Angle Coeffs
+    if self.angle_types != []:
+      f.write('Angle Coeffs\n\n')
+      i = 0
+      for angle_type in self.angle_types:
+        i += 1
+        coeffs_str = ' '.join(['%9.4f' % coeff for coeff in angle_type['coeffs']])
+        if 'comment' in angle_type and angle_type['comment'] is not None:
+          f.write('%4d %s # %s\n' % (i, coeffs_str, angle_type['comment']))
+        else:
+          f.write('%4d %s\n' % (i, coeffs_str))
+      f.write('\n')
+
+    # Dihedral Coeffs
+    if self.dihedral_types != []:
+      # If there's no style defined, there's only one
+      try:
+        nb_style = len(set([d['style'] for d in self.dihedral_types]))
+      except KeyError:
+        nb_style = 1
+      f.write('Dihedral Coeffs\n\n')
+      i = 0
+      for dihedral_type in self.dihedral_types:
+        i += 1
+        coeffs_str = ' '.join(['%9.4f' % coeff for coeff in dihedral_type['coeffs']])
+        # Don't forget the style if multiple
+        if nb_style == 1:
+          if 'comment' in dihedral_type and dihedral_type['comment'] is not None:
+            f.write('%4d %s # %s\n' % (i, coeffs_str, dihedral_type['comment']))
+          else:
+            f.write('%4d %s\n' % (i, coeffs_str))
+        else:
+          if 'comment' in dihedral_type and dihedral_type['comment'] is not None:
+            f.write('%4d %7s %s # %s\n' % (i, dihedral_type['style'], coeffs_str, dihedral_type['comment']))
+          else:
+            f.write('%4d %7s %s\n' % (i, dihedral_type['style'], coeffs_str))
+      f.write('\n')
+
+    # Improper Coeffs
+    if self.improper_types != []:
+      f.write('Improper Coeffs\n\n')
+      i = 0
+      for improper_type in self.improper_types:
+        i += 1
+        coeffs_str = ' '.join(['%9.4f' % coeff for coeff in improper_type['coeffs']])
+        if 'comment' in improper_type and improper_type['comment'] is not None:
+          f.write('%4d %s # %s\n' % (i, coeffs_str, improper_type['comment']))
+        else:
+          f.write('%4d %s\n' % (i, coeffs_str))
+      f.write('\n')
+
+    # Atoms
+    f.write('Atoms\n\n')
+    for atom in self.atoms:
+      #TODO assume atom_style is full
+      if 'comment' in atom and atom['comment'] is not None:
+        f.write('%7d %7d %7d %9.4f %13.6e %13.6e %13.6e # %s\n' % (atom['i'], atom['mol_i'], atom['atom_type_i'], atom['charge'], atom['x'], atom['y'], atom['z'], atom['comment']))
+      else:
+        f.write('%7d %7d %7d %9.4f %13.6e %13.6e %13.6e\n' % (atom['i'], atom['mol_i'], atom['atom_type_i'], atom['charge'], atom['x'], atom['y'], atom['z']))
+    f.write('\n')
+
+    # Bonds
+    if self.bonds != []:
+      f.write('Bonds\n\n')
+      for bond in self.bonds:
+        if 'comment' in bond and bond['comment'] is not None:
+          f.write('%7d %7d %7d %7d # %s\n' % (bond['i'], bond['bond_type']['i'], bond['atom1']['i'], bond['atom2']['i'], bond['comment']))
+        else:
+          f.write('%7d %7d %7d %7d\n' % (bond['i'], bond['bond_type']['i'], bond['atom1']['i'], bond['atom2']['i']))
+      f.write('\n')
+
+    # Angles
+    if self.angles != []:
+      f.write('Angles\n\n')
+      for angle in self.angles:
+        if 'comment' in angle and angle['comment'] is not None:
+          f.write('%7d %7d %7d %7d %7d # %s\n' % (angle['i'], angle['angle_type']['i'], angle['atom1']['i'], angle['atom2']['i'], angle['atom3']['i'], angle['comment']))
+        else:
+          f.write('%7d %7d %7d %7d %7d\n' % (angle['i'], angle['angle_type']['i'], angle['atom1']['i'], angle['atom2']['i'], angle['atom3']['i']))
+      f.write('\n')
+
+    # Dihedrals
+    if self.dihedrals != []:
+      f.write('Dihedrals\n\n')
+      for dihedral in self.dihedrals:
+        if 'comment' in dihedral and dihedral['comment'] is not None:
+          f.write('%7d %7d %7d %7d %7d %7d # %s\n' % (dihedral['i'], dihedral['dihedral_type']['i'], \
+                  dihedral['atom1']['i'], dihedral['atom2']['i'], dihedral['atom3']['i'], dihedral['atom4']['i'], dihedral['comment']))
+        else:
+          f.write('%7d %7d %7d %7d %7d %7d\n' % (dihedral['i'], dihedral['dihedral_type']['i'], dihedral['atom1']['i'], dihedral['atom2']['i'], dihedral['atom3']['i'], dihedral['atom4']['i']))
+      f.write('\n')
+
+    # Impropers
+    if self.impropers != []:
+      f.write('Impropers\n\n')
+      for improper in self.impropers:
+        if 'comment' in improper and improper['comment'] is not None:
+          f.write('%7d %7d %7d %7d %7d %7d # %s\n' % (improper['i'], improper['improper_type']['i'], \
+                  improper['atom1']['i'], improper['atom2']['i'], improper['atom3']['i'], improper['atom4']['i'], improper['comment']))
+        else:
+          f.write('%7d %7d %7d %7d %7d %7d\n' % (improper['i'], improper['improper_type']['i'], improper['atom1']['i'], improper['atom2']['i'], improper['atom3']['i'], improper['atom4']['i']))
+
+    # Extra
+    if self.extras != []:
+      f.write('Extras\n\n')
+      for extra in self.extras:
+        if 'comment' in extra and extra['comment'] is not None:
+          f.write('%7d %s # %s\n' % (extra['i'], extra['line'], extra['comment']))
+        else:
+          f.write('%7d %s\n' % (extra['i'], extra['line']))
+
+    # Velocities
+
+    # TODO ignore Velocities ?
 
 class Log(object):
   '''Class representing a Log file reader (for thermo infos)'''
@@ -348,6 +812,9 @@ class Log(object):
     self.filename = filename
 
     self.run = run
+
+    # Default is read only one run
+    self.nb_runs = 1
 
     self.steps = 0
 
@@ -373,25 +840,13 @@ class Log(object):
 
     # Seek to the start of the thermo stuff (and skip)
     for _ in xrange(self.run):
-      line = self.f.readline()
-      while not line.startswith('Memory usage per processor'):
-        line = self.f.readline()
-        # Get and store steps (if int)
-        if line.startswith('run'):
-          try:
-            self.steps = int(line.split()[1])
-          except ValueError:
-            pass
-        # If EOF
-        if line == '':
-          if self.run != 1:
-            raise ValueError('File %s does not seem to be a valid LAMMPS log file (with thermo infos) or does not contain info for run %d' % (self.filename, self.run))
-          else:
-            raise ValueError('File %s does not seem to be a valid LAMMPS log file (with thermo infos)' % self.filename)
+      self.seek_next_run()
+    if self.run == 0:
+      self.seek_next_run()
 
     line = self.f.readline()
     if not line.startswith('-----'):
-      tmp_fields = [ field.lower() for field in line.split() ]
+      tmp_fields = [field.lower() for field in line.split()]
       self.fields = []
       mult = {}
       for field in tmp_fields:
@@ -441,19 +896,36 @@ class Log(object):
 
     stats = {}
 
+    if self.run == 0:
+      stats['run'] = self.nb_runs
+    else:
+      stats['run'] = self.run
+
     if not self.is_multi:
       # One line version
       line = self.f.readline()
       values = line.split()
-      if line == '' or line.startswith('Loop'):
+      if line == '':
         raise StopIteration
+      if line.startswith('Loop'):
+        if self.run == 0:
+          self.seek_next_run(True)
+          return self.next()
+        else:
+          raise StopIteration
 
       # Skip garbage
       while len(values) != len(self.fields):
         line = self.f.readline()
         values = line.split()
-        if line == '' or line.startswith('Loop'):
+        if line == '':
           raise StopIteration
+        if line.startswith('Loop'):
+          if self.run == 0:
+            self.seek_next_run(True)
+            return self.next()
+          else:
+            raise StopIteration
 
       for (field, value) in zip(self.fields, values):
         # Special case for int values
@@ -500,7 +972,11 @@ class Log(object):
 
       # Reach next log
       if line.startswith('Memory usage per processor'):
-        raise StopIteration
+        if self.run == 0:
+          self.seek_next_run(True)
+          return self.next()
+        else:
+          raise StopIteration
 
       # We reach the first line of the next record
       if line.startswith('-----'):
@@ -509,7 +985,11 @@ class Log(object):
           self.next_step = int(values[2])
           self.next_cpu = float(values[6])
         except IndexError:
-          raise StopIteration
+          if self.run == 0:
+            self.seek_next_run(True)
+            return self.next()
+          else:
+            raise StopIteration
 
     return stats
 
@@ -518,8 +998,33 @@ class Log(object):
 
     nb_fields = len(self.fields)
     types = zip(self.fields, [float] * nb_fields)
-    return np.array([tuple([ line[field] for field in self.fields ]) for line in self], dtype=types)
+    return np.array([tuple([line[field] for field in self.fields]) for line in self], dtype=types)
 
+  def seek_next_run(self, is_multi_run=False):
+    '''Seek to next run'''
+
+    line = self.f.readline()
+    while not line.startswith('Memory usage per processor'):
+      line = self.f.readline()
+      # Get and store steps (if int)
+      if line.startswith('run'):
+        try:
+          self.steps = int(line.split()[1])
+        except ValueError:
+          pass
+      # If EOF
+      if line == '':
+        if is_multi_run:
+          raise StopIteration
+        elif self.run != 1 and self.run != 0:
+          raise ValueError('File %s does not seem to be a valid LAMMPS log file (with thermo infos) or does not contain info for run %d' % (self.filename, self.run))
+        else:
+          raise ValueError('File %s does not seem to be a valid LAMMPS log file (with thermo infos)' % self.filename)
+
+    # Skip the header if not useful
+    if is_multi_run:
+      self.f.readline()
+      self.nb_runs += 1
 
 class Dump(object):
   '''Class representing a Dump file reader'''
@@ -638,17 +1143,17 @@ class Dump(object):
     # The format can't change, so store in raw style
     cnf['box'] = []
     line = self.f.next()
-    cnf['box'].append([ float(line.split()[0]), float(line.split()[1]) ])
+    cnf['box'].append([float(line.split()[0]), float(line.split()[1])])
     if is_tilt:
       xy = float(line.split()[2])
 
     line = self.f.next()
-    cnf['box'].append([ float(line.split()[0]), float(line.split()[1]) ])
+    cnf['box'].append([float(line.split()[0]), float(line.split()[1])])
     if is_tilt:
       xz = float(line.split()[2])
 
     line = self.f.next()
-    cnf['box'].append([ float(line.split()[0]), float(line.split()[1]) ])
+    cnf['box'].append([float(line.split()[0]), float(line.split()[1])])
     if is_tilt:
       yz = float(line.split()[2])
     if is_tilt:
@@ -741,7 +1246,7 @@ class Ave(object):
       raise ValueError('File %s does not seem to be a valid LAMMPS ave file' % self.filename)
 
     # The third ones contains field names
-    line =  self.f.readline()
+    line = self.f.readline()
     if not line.startswith('#'):
       raise ValueError('File %s does not seem to be a valid LAMMPS ave file' % self.filename)
 
@@ -792,5 +1297,5 @@ class Ave(object):
 
     nb_fields = len(self.fields)
     data = list(self)
-    types = [('timestep', float)] + zip(self.fields, [float]*nb_fields, [ (len(data[0][self.fields[0]]),) ] * nb_fields)
-    return np.array([ (line['timestep'],) + tuple(line[self.fields[i]] for i in xrange(nb_fields)) for line in data], dtype=types)
+    types = [('timestep', float)] + zip(self.fields, [float]*nb_fields, [(len(data[0][self.fields[0]]),)] * nb_fields)
+    return np.array([(line['timestep'],) + tuple(line[self.fields[i]] for i in xrange(nb_fields)) for line in data], dtype=types)

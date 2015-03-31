@@ -241,7 +241,7 @@ class Config(object):
       self_atom = {}
 
       self_atom['atmnam'] = atom['atmnam']
-      self_atom['iatm'] =  atom['iatm']
+      self_atom['iatm'] = atom['iatm']
 
       self_atom['xxx'] = atom['xxx']
       self_atom['yyy'] = atom['yyy']
@@ -359,7 +359,7 @@ class Field(object):
       if len(mol['bonds']) > 0:
         f.write('BONDS %d\n' % len(mol['bonds']))
         for bond in mol['bonds']:
-          f.write('%s %d %d %s' % (bond['field_type'], bond['atom_i1'], bond['atom_i2'], ' '.join([ '%f' % p for p in bond['par'] ])))
+          f.write('%s %d %d %s' % (bond['field_type'], bond['atom_i1'], bond['atom_i2'], ' '.join(['%f' % p for p in bond['par']])))
           if with_comment:
             f.write(' # %s-%s\n' % (mol['atoms'][bond['atom_i1'] - 1]['name'], mol['atoms'][bond['atom_i2'] - 1]['name']))
           else:
@@ -368,16 +368,16 @@ class Field(object):
       if len(mol['rigids']) > 0:
         f.write('RIGID UNITS %d\n' % len(mol['rigids']))
         for rigid in mol['rigids']:
-          f.write('%d %s' % (len(rigid), ' '.join([ '%d' % i for i in rigid ])))
+          f.write('%d %s' % (len(rigid), ' '.join(['%d' % i for i in rigid])))
           if with_comment:
-            f.write(' # %s\n' % ('-'.join([ mol['atoms'][i - 1]['name'] for i in rigid ])))
+            f.write(' # %s\n' % ('-'.join([mol['atoms'][i - 1]['name'] for i in rigid])))
           else:
             f.write('\n')
 
       if len(mol['angles']) > 0:
         f.write('ANGLES %d\n' % len(mol['angles']))
         for angle in mol['angles']:
-          f.write('%s %d %d %d %s' % (angle['field_type'], angle['atom_i1'], angle['atom_i2'], angle['atom_i3'], ' '.join([ '%f' % p for p in angle['par'] ])))
+          f.write('%s %d %d %d %s' % (angle['field_type'], angle['atom_i1'], angle['atom_i2'], angle['atom_i3'], ' '.join(['%f' % p for p in angle['par']])))
           if with_comment:
             f.write(' # %s-%s-%s\n' % (mol['atoms'][angle['atom_i1'] - 1]['name'], mol['atoms'][angle['atom_i2'] - 1]['name'], mol['atoms'][angle['atom_i3'] - 1]['name']))
           else:
@@ -386,7 +386,7 @@ class Field(object):
       if len(mol['dihedrals']) > 0:
         f.write('DIHEDRALS %d\n' % len(mol['dihedrals']))
         for dihedral in mol['dihedrals']:
-          f.write('%s %d %d %d %d %s ' % (dihedral['field_type'], dihedral['atom_i1'], dihedral['atom_i2'], dihedral['atom_i3'], dihedral['atom_i4'], ' '.join([ '%f' % p for p in dihedral['par'] ])))
+          f.write('%s %d %d %d %d %s ' % (dihedral['field_type'], dihedral['atom_i1'], dihedral['atom_i2'], dihedral['atom_i3'], dihedral['atom_i4'], ' '.join(['%f' % p for p in dihedral['par']])))
           if is_nonpatched:
             for _ in xrange(3 - len(dihedral['par'])):
               f.write('%f ' % 0.0)
@@ -404,7 +404,7 @@ class Field(object):
 
     f.write('VDW %d\n' % len(self.vdws))
     for vdw in self.vdws:
-      f.write('%s %s %s %s\n' % (vdw['atom_type1'], vdw['atom_type2'], vdw['field_type'], ' '.join([ '%f' % p for p in vdw['par'] ])))
+      f.write('%s %s %s %s\n' % (vdw['atom_type1'], vdw['atom_type2'], vdw['field_type'], ' '.join(['%f' % p for p in vdw['par']])))
     f.write('CLOSE\n')
     f.close()
 
@@ -565,7 +565,7 @@ class Field(object):
               int_fields.append(int(field))
             except ValueError:
               pass
-          mol['rigids'].append([ int(field) for field in int_fields ])
+          mol['rigids'].append([int(field) for field in int_fields])
 
           remain_rigids -= 1
 
@@ -708,7 +708,7 @@ class Field(object):
       vdw['atom_type1'] = fields[0]
       vdw['atom_type2'] = fields[1]
       vdw['field_type'] = fields[2]
-      vdw['par'] = [ float(p) for p in fields[3:] ]
+      vdw['par'] = [float(p) for p in fields[3:]]
 
       remain_vdws -= 1
 
@@ -924,7 +924,7 @@ class History(object):
         atoms['fzz'] = array['fzz']
 
     else:
-      atoms = [ {} for _ in xrange(nbatoms) ]
+      atoms = [{} for _ in xrange(nbatoms)]
       if not xyz_only:
         for iatom, line in enumerate(static):
           atom = atoms[iatom]
@@ -969,7 +969,7 @@ class Statis(object):
     # Get the ntpatm values from the FIELD
     if field_filename is not None:
       field = Field(field_filename)
-      self.ntpatm = len(set([ pair['atom_type1'] for pair in field.vdws ]))
+      self.ntpatm = len(set([pair['atom_type1'] for pair in field.vdws]))
 
     if (is_stress or is_npt) and not self.ntpatm:
       raise ValueError('Cannot get stress or NPT infos without ntpatm parameter')
@@ -1143,7 +1143,7 @@ class Statis(object):
     if self.ntpatm:
       dtype[keys.index('amsd')] = ('amsd', float, self.ntpatm)
     ss = itertools.chain((cnf,), self)
-    return np.array([ tuple([ cnf[key] for key in keys ]) for cnf in ss], dtype=dtype)
+    return np.array([tuple([cnf[key] for key in keys]) for cnf in ss], dtype=dtype)
 
 class RDFDat(object):
   '''Class representing a RDFDat file reader'''

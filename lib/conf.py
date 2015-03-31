@@ -1,6 +1,7 @@
 # -*- coding: iso-8859-1 -*-
 '''Python library to manage configuration'''
-import numpy as np
+
+import logging
 
 import molecule
 import lammps
@@ -9,6 +10,8 @@ import dlpoly
 class Box(object):
 
   def __init__(self, cnf=None, typ=None):
+
+    self.typ = typ
 
     if typ == 'dlpoly':
       # Missing things, but enough for us
@@ -80,6 +83,10 @@ class Box(object):
 
       self.xy = self.xz = self.yz = 0.0
 
+    self.lx = abs(self.x[1] - self.x[0])
+    self.ly = abs(self.y[1] - self.y[0])
+    self.lz = abs(self.z[1] - self.z[0])
+
   def __str__(self):
     return 'Box %f/%f %f/%f %f/%f' \
       % (self.x[0], self.x[1], self.y[0], self.y[1], self.z[0], self.z[1])
@@ -131,6 +138,7 @@ class Conf(object):
     self.mols = []
     self.timestep = 0.0
     self.dump = None
+    self.typ = typ
 
     if typ == 'dlpoly':
       self.dump = cnf['history']
@@ -322,7 +330,7 @@ class Conf(object):
             mol = molecule.Molecule(name='M0', i=0)
             mols.append(mol)
           else:
-             mol = mols[i_mol - 1]
+            mol = mols[i_mol - 1]
           if 'element' in catom.dtype.names:
             name = catom['element']
           else:
@@ -366,3 +374,126 @@ class Conf(object):
       if form not in formulas:
         formulas.append(form)
     return formulas
+
+  def get_clusters(self, mol_names, r):
+    '''Return the list of mols in the same cluster'''
+
+    class Cluster(object):
+      clusters = []
+
+      def __init__(self, mol):
+        self.mols = [mol]
+        Cluster.clusters.append(self)
+
+      def __str__(self):
+        return ' '.join([mol.name for mol in self.mols])
+
+      def __repr__(self):
+        return ' '.join([mol.name for mol in self.mols])
+
+      def merge(self, other):
+        '''Merge two cluster into one'''
+
+        self.mols += other.mols
+        for mol in other.mols:
+          mol.cluster = self
+        Cluster.clusters.remove(other)
+
+    # Init stuff
+    clusterable_mols = []
+    for mol in self.mols:
+      if str(mol.formula) not in mol_names and mol.name not in mol_names:
+        continue
+      clusterable_mols.append(mol)
+      mol.reconstruct(self.box)
+      mol.cluster = Cluster(mol)
+
+    for mol in clusterable_mols:
+      for mol2 in clusterable_mols:
+        if mol == mol2 or mol.cluster == mol2.cluster:
+          continue
+
+        if mol.near(mol2, self.box, 'prox_cm', {'min_dist': 0.0, 'max_dist': r}):
+          mol.cluster.merge(mol2.cluster)
+
+    # Return group of mols
+    return [cluster.mols for cluster in Cluster.clusters]
+
+  def recenter_z(self, center_mol):
+    '''Try to recenter the mols on the center mol and along z
+       The recenter can take several iterations or fail'''
+
+    # Detect if the center mol is located on the PBC
+    is_inside = False
+    nb_slide = 0
+    while not is_inside:
+      min_z = max_z = None
+      for mol in self.mols:
+        if mol.name != center_mol and molecule.Formula(center_mol) != mol.formula:
+          continue
+        mol.reconstruct(self.box)
+        if max_z is None or mol.cm[2] > max_z:
+          max_z = mol.cm[2]
+        if min_z is None or mol.cm[2] < min_z:
+          min_z = mol.cm[2]
+
+      slide_z = 0.0
+      if (max_z - min_z) > 0.9 * self.box.lz:
+        nb_slide += 1
+        if nb_slide > 20:
+          logging.warning('Cannot center mol %s, I keep this conf unchanged...', center_mol)
+          return
+        slide_z = 0.1 * self.box.lz
+        logging.info('I slide z from %f to move from PBC', slide_z)
+
+        for mol in self.mols:
+          for atom in mol.atoms:
+            atom.z += slide_z
+            # PBC MGMT
+            if self.typ == 'dlpoly':
+              if atom.z < -self.box.lz / 2.0:
+                atom.z += self.box.lz
+              elif atom.z > self.box.lz / 2.0:
+                atom.z -= self.box.lz
+            else:
+              if atom.z < self.box.z[0]:
+                atom.z += self.box.lz
+              elif atom.z > self.box.z[1]:
+                atom.z -= self.box.lz
+          mol._cm = None
+      else:
+        is_inside = True
+
+    # Recenter along z to make inside mols center
+    z_cm = 0.0
+    nb_z = 0
+    for mol in self.mols:
+      if mol.name != center_mol and molecule.Formula(center_mol) != mol.formula:
+        continue
+      z_cm += mol.cm[2]
+      # Reset cache
+      mol._cm = None
+      nb_z += 1
+
+    z_cm = z_cm / nb_z
+    if self.typ == 'dlpoly':
+      # Dlpoly is centered on 0
+      z_shift = z_cm
+    else:
+      z_shift = z_cm - self.box.z[0] - (self.box.z[1] - self.box.z[0]) / 2.0
+    logging.debug('Conf shifted by %f', z_shift)
+
+    for mol in self.mols:
+      for atom in mol.atoms:
+        atom.z -= z_shift
+        # PBC MGMT
+        if self.typ == 'dlpoly':
+          if atom.z < -self.box.lz / 2.0:
+            atom.z += self.box.lz
+          elif atom.z > self.box.lz / 2.0:
+            atom.z -= self.box.lz
+        else:
+          if atom.z < self.box.z[0]:
+            atom.z += self.box.lz
+          elif atom.z > self.box.z[1]:
+            atom.z -= self.box.lz

@@ -4,6 +4,7 @@
 import logging
 import math
 import re
+import copy
 
 import xyz
 import mol
@@ -110,6 +111,14 @@ class Atom(BaseAtom):
       return self._params[name]
     elif self.atype:
       return getattr(self.atype, name)
+    # Try to get mass from element
+    elif name == 'mass':
+      try:
+        el = element.Element(self.symbol)
+        return el.mass
+      except ValueError:
+        # Invalid symbol
+        raise AttributeError
     else:
       raise AttributeError
 
@@ -188,7 +197,7 @@ class Formula(object):
       self.fml = {'+': 0.}
       tokens = re.findall('[A-Z][a-z]*|[0-9]+|\+|\-|\(|\)|\[|\]', form)
       tokens.reverse()
-      n = [ 1 ]
+      n = [1]
       num = 1
       # Put each token in a dict with the number as value
       for token in tokens:
@@ -263,7 +272,7 @@ class Molecule(object):
     for atom in mol_xyz.atoms:
       if 'CONNECT' in atom['comment']:
         a = self.atoms[i - 1]
-        i_neighbs = [ int(n) for n in atom['comment'].split('CONNECT')[1].split()[0].split(',') ]
+        i_neighbs = [int(n) for n in atom['comment'].split('CONNECT')[1].split()[0].split(',')]
         for i_n in i_neighbs:
           try:
             a.neighbs.append(self.atoms[i_n - 1])
@@ -271,16 +280,12 @@ class Molecule(object):
             raise ValueError('Connection error between %s and %d', a, i_n)
       i += 1
 
-    # Check if connections are coherent
-    for a in self.atoms:
-      for neighb in a.neighbs:
-        if a not in neighb.neighbs:
-          raise ValueError('Incoherent connections')
+    self.check_connections()
 
     # Then impropers
     for comment in mol_xyz.footer_comments:
       if comment.startswith('IMPROPER'):
-        (i1, i2, i3, i4) = [ int(i) for i in comment.split('IMPROPER')[1].split()[0].split(',') ]
+        (i1, i2, i3, i4) = [int(i) for i in comment.split('IMPROPER')[1].split()[0].split(',')]
         self.impropers.append((self.atoms[i1 - 1], self.atoms[i2 - 1], \
                                self.atoms[i3 - 1], self.atoms[i4 - 1]))
 
@@ -360,7 +365,7 @@ class Molecule(object):
         # / |CD x CB| is the unit vector normal to the plane BCD. m =
         # CB x n / |CB x n| is the unit vector on the plane BCD
         # normal to the direction CB.
-        # 
+        #
         #                              .'A
         #                ------------.' /.-----------------
         #               /           b /  .               /
@@ -448,11 +453,11 @@ class Molecule(object):
     # In these case the coordinates stay (0, 0, 0), we only get connections
 
     the_mol = None
-    for mol in field.mols:
-      if self.name != mol['name']:
+    for mol_ in field.mols:
+      if self.name != mol_['name']:
         continue
       else:
-        the_mol = mol
+        the_mol = mol_
     if not the_mol:
       raise ValueError('Unknown molecule %s in FIELD %s' % (self.name, self.filename))
 
@@ -536,7 +541,7 @@ class Molecule(object):
 
   def __str__(self):
     return 'Molecule %s %s : %s' \
-      % (self.name, self.filename, ' '.join([ str(a) for a in self.atoms]))
+      % (self.name, self.filename, ' '.join([str(a) for a in self.atoms]))
 
   def __repr__(self):
     return '%s/%s' % (self.name, self.filename)
@@ -584,7 +589,7 @@ class Molecule(object):
 
     for atom in self.atoms:
       if len(atom.neighbs):
-        comment = ','.join([ str(neighb.i) for neighb in atom.neighbs ])
+        comment = ','.join([str(neighb.i) for neighb in atom.neighbs])
         f.write('%s %f %f %f # CONNECT %s\n' % (atom.name, atom.x, atom.y, atom.z, comment))
       else:
         f.write('%s %f %f %f\n' % (atom.name, atom.x, atom.y, atom.z))
@@ -614,11 +619,73 @@ class Molecule(object):
       if atom2remove in atom.neighbs:
         atom.neighbs.remove(atom2remove)
 
+  def check_connections(self):
+    '''Check if connections are coherent'''
+
+    for a in self.atoms:
+      for neighb in a.neighbs:
+        if a not in neighb.neighbs:
+          raise ValueError('Incoherent connections')
+
+  def add_connections(self, max_r=2.0):
+    '''Add connections from max radius'''
+
+    for atom in self.atoms:
+      for atom2 in self.atoms:
+        if atom2 in atom.neighbs or atom is atom2:
+          continue
+        dx = atom2.x - atom.x
+        dy = atom2.y - atom.y
+        dz = atom2.z - atom.z
+        r = math.sqrt(dx * dx + dy * dy + dz * dz)
+        if r < max_r:
+          atom.neighbs.append(atom2)
+          atom2.neighbs.append(atom)
+
+  def fusion_multi(self, max_r=0.5):
+    '''Fusion atoms which are (quite) at the same place'''
+
+    atoms2remove_i = []
+    for atom in self.atoms:
+      for atom2 in self.atoms:
+        if atom is atom2 or atom.i in atoms2remove_i or atom2.i in atoms2remove_i or atom.name != atom2.name:
+          continue
+        dx = atom2.x - atom.x
+        dy = atom2.y - atom.y
+        dz = atom2.z - atom.z
+        r = math.sqrt(dx * dx + dy * dy + dz * dz)
+        if r < max_r:
+          atom.x = (atom.x + atom2.x) / 2.0
+          atom.y = (atom.y + atom2.y) / 2.0
+          atom.z = (atom.z + atom2.z) / 2.0
+          atoms2remove_i.append(atom2.i)
+          for atom3 in atom2.neighbs:
+            if atom3 not in atom.neighbs:
+              atom.neighbs.append(atom3)
+
+    atoms2remove_i.sort(reverse=True)
+    for i in atoms2remove_i:
+      self.remove_atom(i)
+
   def add_mol(self, other):
     nb = len(self.atoms)
     for atom in other.atoms:
       atom.i += nb
       self.atoms.append(atom)
+
+  def duplicate(self, x=0.0, y=0.0, z=0.0):
+    '''Duplicate the current molecule with moving it'''
+
+    copy_atoms = []
+    for atom in self.atoms:
+      copy_atom = copy.copy(atom)
+      copy_atom.neighbs = []
+      copy_atom.x += x
+      copy_atom.y += y
+      copy_atom.z += z
+      copy_atom.i += len(self.atoms)
+      copy_atoms.append(copy_atom)
+    self.atoms += copy_atoms
 
   def get_all_bonds(self):
     '''Return all the bonds of the molecules'''
@@ -752,7 +819,7 @@ class Molecule(object):
       atom.y = origin[1] + v.y
       atom.z = origin[2] + v.z
 
-  def near(self, other, typ, params):
+  def near(self, other, box, typ, params):
     '''Check if an other molecule is near or not and return the connexion type'''
 
     if typ == 'hbond':
@@ -770,23 +837,23 @@ class Molecule(object):
           v_ha = utils3d.Vector3d(a.x - h.x, a.y - h.y, a.z - h.z)
 
           # Optimization
-          if (v_ha.x > params['max_dist'] and v_ha.x < params['box_size'][0]/2.0) or \
-             (v_ha.y > params['max_dist'] and v_ha.y < params['box_size'][1]/2.0) or \
-             (v_ha.z > params['max_dist'] and v_ha.z < params['box_size'][2]/2.0):
+          if (v_ha.x > params['max_dist'] and v_ha.x < box.lx/2.0) or \
+             (v_ha.y > params['max_dist'] and v_ha.y < box.ly/2.0) or \
+             (v_ha.z > params['max_dist'] and v_ha.z < box.lz/2.0):
             continue
 
-          if v_ha.x > params['box_size'][0]/2.0:
-            v_ha.x -= params['box_size'][0]
-          if v_ha.y > params['box_size'][1]/2.0:
-            v_ha.y -= params['box_size'][1]
-          if v_ha.z > params['box_size'][2]/2.0:
-            v_ha.z -= params['box_size'][2]
-          if v_ha.x < -params['box_size'][0]/2.0:
-            v_ha.x += params['box_size'][0]
-          if v_ha.y < -params['box_size'][1]/2.0:
-            v_ha.y += params['box_size'][1]
-          if v_ha.z < -params['box_size'][2]/2.0:
-            v_ha.z += params['box_size'][2]
+          if v_ha.x > box.lx/2.0:
+            v_ha.x -= box.lx
+          if v_ha.y > box.ly/2.0:
+            v_ha.y -= box.ly
+          if v_ha.z > box.lz/2.0:
+            v_ha.z -= box.lz
+          if v_ha.x < -box.lx/2.0:
+            v_ha.x += box.lx
+          if v_ha.y < -box.ly/2.0:
+            v_ha.y += box.ly
+          if v_ha.z < -box.lz/2.0:
+            v_ha.z += box.lz
 
           # Optimization
           if v_ha.x > params['max_dist'] or v_ha.y > params['max_dist'] or v_ha.z > params['max_dist']:
@@ -798,18 +865,18 @@ class Molecule(object):
 
           v_hd = utils3d.Vector3d(d.x - h.x, d.y - h.y, d.z - h.z)
 
-          if v_hd.x > params['box_size'][0]/2.0:
-            v_hd.x -= params['box_size'][0]
-          if v_hd.y > params['box_size'][1]/2.0:
-            v_hd.y -= params['box_size'][1]
-          if v_hd.z > params['box_size'][2]/2.0:
-            v_hd.z -= params['box_size'][2]
-          if v_hd.x < -params['box_size'][0]/2.0:
-            v_hd.x += params['box_size'][0]
-          if v_hd.y < -params['box_size'][1]/2.0:
-            v_hd.y += params['box_size'][1]
-          if v_hd.z < -params['box_size'][2]/2.0:
-            v_hd.z += params['box_size'][2]
+          if v_hd.x > box.lx/2.0:
+            v_hd.x -= box.lx
+          if v_hd.y > box.ly/2.0:
+            v_hd.y -= box.ly
+          if v_hd.z > box.lz/2.0:
+            v_hd.z -= box.lz
+          if v_hd.x < -box.lx/2.0:
+            v_hd.x += box.lx
+          if v_hd.y < -box.ly/2.0:
+            v_hd.y += box.ly
+          if v_hd.z < -box.lz/2.0:
+            v_hd.z += box.lz
 
           # Angle criterion
           cross = v_ha.unit().dot(v_hd.unit())
@@ -824,25 +891,44 @@ class Molecule(object):
       for s in self.atoms:
         for o in other.atoms:
           v = utils3d.Vector3d(s.x - o.x, s.y - o.y, s.z - o.z)
-          if v.x > params['box_size'][0]/2.0:
-            v.x -= params['box_size'][0]
-          if v.y > params['box_size'][1]/2.0:
-            v.y -= params['box_size'][1]
-          if v.z > params['box_size'][2]/2.0:
-            v.z -= params['box_size'][2]
-          if v.x < -params['box_size'][0]/2.0:
-            v.x += params['box_size'][0]
-          if v.y < -params['box_size'][1]/2.0:
-            v.y += params['box_size'][1]
-          if v.z < -params['box_size'][2]/2.0:
-            v.z += params['box_size'][2]
+          if v.x > box.lx/2.0:
+            v.x -= box.lx
+          if v.y > box.ly/2.0:
+            v.y -= box.ly
+          if v.z > box.lz/2.0:
+            v.z -= box.lz
+          if v.x < -box.lx/2.0:
+            v.x += box.lx
+          if v.y < -box.ly/2.0:
+            v.y += box.ly
+          if v.z < -box.lz/2.0:
+            v.z += box.lz
 
           length = v.length()
           if length > params['min_dist'] and length < params['max_dist']:
             return True
-
       # No proximity detected
       return False
+    elif typ == 'prox_cm':
+      v = utils3d.Vector3d(self.cm[0] - other.cm[0], self.cm[1] - other.cm[1], self.cm[2] - other.cm[2])
+      if v.x > box.lx/2.0:
+        v.x -= box.lx
+      if v.y > box.ly/2.0:
+        v.y -= box.ly
+      if v.z > box.lz/2.0:
+        v.z -= box.lz
+      if v.x < -box.lx/2.0:
+        v.x += box.lx
+      if v.y < -box.ly/2.0:
+        v.y += box.ly
+      if v.z < -box.lz/2.0:
+        v.z += box.lz
+
+      length = v.length()
+      if length > params['min_dist'] and length < params['max_dist']:
+        return True
+      else:
+        return False
     else:
       return False
 
@@ -874,8 +960,8 @@ class Molecule(object):
             break
       return l
 
-    atoms_symb_mass_1 = set([ (atom.symbol, ff.atoms[atom.name].mass) for atom in self.atoms ])
-    atoms_symb_mass_2 = set([ (atom.symbol, ff.atoms[atom.name].mass) for atom in other.atoms ])
+    atoms_symb_mass_1 = set([(atom.symbol, ff.atoms[atom.name].mass) for atom in self.atoms])
+    atoms_symb_mass_2 = set([(atom.symbol, ff.atoms[atom.name].mass) for atom in other.atoms])
 
     common_atoms = atoms_symb_mass_1.intersection(atoms_symb_mass_2)
 
@@ -915,9 +1001,9 @@ class Molecule(object):
     # Create the fusion mol
     fusion_mol = Molecule(filename='%s-%s' % (self.filename, other.filename), name='%s-%s' % (self.name, other.name))
 
-    fusioned1 = [ f[0] for f in best_fusion[1] ]
+    fusioned1 = [f[0] for f in best_fusion[1]]
 
-    fusioned2 = [ f[1] for f in best_fusion[1] ]
+    fusioned2 = [f[1] for f in best_fusion[1]]
 
     i = 0
     # Create common atoms (with only need atom1 ref)
