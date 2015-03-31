@@ -113,9 +113,14 @@ How to use
 
 It's the same as the *normal* simulation but:
 
-  * the `.ff` files must provide the polarizability value of each atom, which corresponds to the 8th column in the file.
+  * the `.ff` files must provide the polarizability value of each atom, which corresponds to the 8th column in the file,
+    and the thole factor (i.e. 2.089) in the 9th column of the file.
 
   * the option `-p` should be added to the `create_conf` command line.
+
+  * the option `--dm` can be used to change the mass of the drude, and `--dk` to change the stiffness of the core-drude bond.
+
+  * run LAMMPS as usual (LAMMPS should be compiled with the package [`user-drude`](https://github.com/jdevemy/lammps-drude))
 
 
 ### Simulation with free energy calculations:
