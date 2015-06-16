@@ -7,7 +7,7 @@ import re
 import copy
 
 import xyz
-import mol
+import zmat
 import dlpoly
 import utils3d
 import element
@@ -294,13 +294,13 @@ class Molecule(object):
       if len(atom.neighbs) == 0:
         logging.info('Poor alone atom detected %s in %s, there is more than one molecule in %s (or you provide a .xyz file without CONNECT)', repr(atom), repr(self), self.filename)
 
-  def mol_init(self, mol_mol):
+  def zmat_init(self, mol_zmat):
     '''Constructor for a .mol molecule'''
 
-    self.name = mol_mol.name
+    self.name = mol_zmat.name
 
     i = 1
-    for atom in mol_mol.atoms:
+    for atom in mol_zmat.atoms:
       if i == 1:
         at = Atom(atom['name'], i, i, 0.0, 0.0, 0.0)
       elif i == 2:
@@ -435,7 +435,7 @@ class Molecule(object):
       i += 1
 
     # Manage extra connection
-    for atom in mol_mol.atoms:
+    for atom in mol_zmat.atoms:
       at = self.atoms[atom['i'] - 1]
       for connect in atom['extra_connect']:
         neighb = self.atoms[connect['i'] - 1]
@@ -443,7 +443,7 @@ class Molecule(object):
           at.neighbs.append(neighb)
 
     # Manage impropers
-    for (a1, a2, a3, a4) in mol_mol.impropers:
+    for (a1, a2, a3, a4) in mol_zmat.impropers:
       self.impropers.append((self.atoms[a1['i'] - 1], self.atoms[a2['i'] - 1], \
                              self.atoms[a3['i'] - 1], self.atoms[a4['i'] - 1]))
 
@@ -531,8 +531,8 @@ class Molecule(object):
       mol_xyz = xyz.Xyz(self.filename)
       self.xyz_init(mol_xyz)
     elif typ == 'mol' or typ == 'zmat':
-      mol_mol = mol.Mol(self.filename)
-      self.mol_init(mol_mol)
+      mol_zmat = zmat.ZMat(self.filename)
+      self.zmat_init(mol_zmat)
     elif typ == 'FIELD':
       field = dlpoly.Field(self.filename)
       self.field_init(field)

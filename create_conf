@@ -28,8 +28,55 @@ KJ2KCAL = 0.239
 
 # TODO create only FIELD (with no conffile)
 
-class FatalError(BaseException):
-  pass
+class Specie(object):
+  '''Define a chemical specie in the simulation box'''
+
+  def __init__(self, nb, mol, ff_, fusion_mol=False):
+
+    self.nb = nb
+    if fusion_mol:
+      self.mol = mol.fusion(fusion_mol, ff_)
+    else:
+      self.mol = mol
+    self.ff = ff_
+
+class AtomType(object):
+  '''An atom type in the simulation'''
+
+  def __init__(self, name, ff_, fr=None, to=None):
+
+    self.i = -1
+    self.i_drude = -1
+    self.name = name
+    self.ff = ff_
+    self.fr = fr
+    self.to = to
+
+    if self.name not in self.ff.atoms:
+      logging.critical('Unable to get infos about atom %s', self.name)
+      raise RuntimeError('Unable to get infos about atom %s', self.name)
+
+    self.field_type = self.ff.atoms[self.name].field_type
+    self.par = self.ff.atoms[self.name].par
+    self.mass = self.ff.atoms[self.name].mass
+    self.charge = self.ff.atoms[self.name].charge
+    self.polarizability = self.ff.atoms[self.name].polarizability
+    if self.polarizability > 0.0:
+      self.is_polar = True
+    else:
+      self.is_polar = False
+    self.thole = self.ff.atoms[self.name].thole
+
+  def __eq__(self, other):
+    return self.name == other.name and self.ff == other.ff and self.fr == other.fr \
+      and self.to == other.to
+
+  def __str__(self):
+    return '%s/%d' % (self.name, self.i)
+
+  def __repr__(self):
+    return '%s/%d' % (self.name, self.i)
+
 
 def convert_energy(from_unit, to_unit, value):
   '''Convert energy unit'''
@@ -50,16 +97,15 @@ def convert_energy(from_unit, to_unit, value):
 #########
 # DLPOLY
 
-def write_dlpoly_field(cnf_xyz, mols, is_nonpatched=False, is_arithmetic=False):
+def write_dlpoly_field(cnf_xyz, species, is_nonpatched=False, is_arithmetic=False):
   '''Write the DL_POLY file FIELD'''
 
   field = dlpoly.Field()
 
   field.header = 'FIELD create_conf %s (%s)' % (cnf_xyz.filename, cnf_xyz.comment)
 
-  # Get the first ff
-  ff_ = mols[0][2]
-
+  # Get the first ff to get the energy unit
+  ff_ = species[0].ff
   if ff_.energy_unit == 'kj/mol':
     field.units = 'kj'
   elif ff_.energy_unit == 'kcal/mol':
@@ -67,22 +113,22 @@ def write_dlpoly_field(cnf_xyz, mols, is_nonpatched=False, is_arithmetic=False):
   else:
     raise ValueError('Unknown energy unit %s' % ff_.energy_unit)
 
-  for (nb, mol, ff_) in mols:
+  for specie in species:
     f_mol = {}
-    f_mol['name'] = mol.name
-    f_mol['nummols'] = nb
+    f_mol['name'] = specie.mol.name
+    f_mol['nummols'] = specie.nb
 
     # ATOMS
     f_mol['atoms'] = []
-    for atom in mol.atoms:
+    for atom in specie.mol.atoms:
       f_atom = {}
       f_atom['name'] = atom.name
       # Look for atoms parameters
-      if atom.name not in ff_.atoms:
-        logging.critical('Unable to get infos about atom %s %d (in mol %s)', atom.name, atom.i, mol.name)
-        raise FatalError('Unable to get infos about atom %s %d (in mol %s)' % (atom.name, atom.i, mol.name))
-      f_atom['weight'] = ff_.atoms[atom.name].mass
-      f_atom['chge'] = ff_.atoms[atom.name].charge
+      if atom.name not in specie.ff.atoms:
+        logging.critical('Unable to get infos about atom %s %d (in mol %s)', atom.name, atom.i, specie.mol.name)
+        raise RuntimeError('Unable to get infos about atom %s %d (in mol %s)' % (atom.name, atom.i, specie.mol.name))
+      f_atom['weight'] = specie.ff.atoms[atom.name].mass
+      f_atom['chge'] = specie.ff.atoms[atom.name].charge
       # Don't manage frozen atom and igrp
       f_atom['frozen'] = False
       f_atom['igrp'] = None
@@ -93,17 +139,17 @@ def write_dlpoly_field(cnf_xyz, mols, is_nonpatched=False, is_arithmetic=False):
     f_mol['bonds'] = []
     f_mol['constraints'] = []
     f_mol['rigids'] = []
-    bonds = mol.get_all_bonds()
+    bonds = specie.mol.get_all_bonds()
     nb_bonds_found = 0
     is_rigid = False
     for bond in bonds:
-      b0_name = ff_.translate(bond[0].name)
-      b1_name = ff_.translate(bond[1].name)
+      b0_name = specie.ff.translate(bond[0].name)
+      b1_name = specie.ff.translate(bond[1].name)
 
       bond_with_name = (b0_name, b1_name)
-      if bond_with_name in ff_.bonds:
-        field_type = ff_.bonds[bond_with_name].field_type
-        par = ff_.bonds[bond_with_name].par
+      if bond_with_name in specie.ff.bonds:
+        field_type = specie.ff.bonds[bond_with_name].field_type
+        par = specie.ff.bonds[bond_with_name].par
         if field_type == 'harm':
           nb_bonds_found += 1
           f_bond = {}
@@ -121,29 +167,29 @@ def write_dlpoly_field(cnf_xyz, mols, is_nonpatched=False, is_arithmetic=False):
           f_const['bondlength'] = par['r']
           f_mol['constraints'].append(f_const)
         else:
-          logging.warning('Unknown bond field type %s for bond %s-%s %d-%d (in mol %s)', field_type, bond[0].name, bond[1].name, bond[0].i, bond[1].i, mol.name)
+          logging.warning('Unknown bond field type %s for bond %s-%s %d-%d (in mol %s)', field_type, bond[0].name, bond[1].name, bond[0].i, bond[1].i, specie.mol.name)
       else:
-        logging.warning('Unable to get infos about bond %s-%s %d-%d (in mol %s)', bond[0].name, bond[1].name, bond[0].i, bond[1].i, mol.name)
+        logging.warning('Unable to get infos about bond %s-%s %d-%d (in mol %s)', bond[0].name, bond[1].name, bond[0].i, bond[1].i, specie.mol.name)
 
-    if nb_bonds_found == 0 and len(mol.atoms) > 1:
-      logging.warning('No bond detected in mol %s, assume it is a rigid mol !', mol.name)
+    if nb_bonds_found == 0 and len(specie.mol.atoms) > 1:
+      logging.warning('No bond detected in mol %s, assume it is a rigid mol !', specie.mol.name)
       # Rigid
       is_rigid = True
-      f_mol['rigids'].append([atom.i for atom in mol.atoms])
+      f_mol['rigids'].append([atom.i for atom in specie.mol.atoms])
 
     # ANGLES
     f_mol['angles'] = []
     if not is_rigid:
-      angles = mol.get_all_angles()
+      angles = specie.mol.get_all_angles()
       for angle in angles:
-        a0_name = ff_.translate(angle[0].name)
-        a1_name = ff_.translate(angle[1].name)
-        a2_name = ff_.translate(angle[2].name)
+        a0_name = specie.ff.translate(angle[0].name)
+        a1_name = specie.ff.translate(angle[1].name)
+        a2_name = specie.ff.translate(angle[2].name)
 
         angle_with_name = (a0_name, a1_name, a2_name)
-        if angle_with_name in ff_.angles:
-          field_type = ff_.angles[angle_with_name].field_type
-          par = ff_.angles[angle_with_name].par
+        if angle_with_name in specie.ff.angles:
+          field_type = specie.ff.angles[angle_with_name].field_type
+          par = specie.ff.angles[angle_with_name].par
           if field_type == 'harm':
             f_angle = {}
             f_angle['field_type'] = field_type
@@ -161,26 +207,26 @@ def write_dlpoly_field(cnf_xyz, mols, is_nonpatched=False, is_arithmetic=False):
             f_angle['par'] = (par['k'], par['theta'])
             f_mol['angles'].append(f_angle)
           else:
-            logging.warning('Unknown angle field type %s for angle %s-%s-%s %d-%d-%d (in mol %s)', field_type, angle[0].name, angle[1].name, angle[2].name, angle[0].i, angle[1].i, angle[2].i, mol.name)
+            logging.warning('Unknown angle field type %s for angle %s-%s-%s %d-%d-%d (in mol %s)', field_type, angle[0].name, angle[1].name, angle[2].name, angle[0].i, angle[1].i, angle[2].i, specie.mol.name)
         else:
-          logging.warning('Unable to get infos about angle %s-%s-%s %d-%d-%d (in mol %s)', angle[0].name, angle[1].name, angle[2].name, angle[0].i, angle[1].i, angle[2].i, mol.name)
+          logging.warning('Unable to get infos about angle %s-%s-%s %d-%d-%d (in mol %s)', angle[0].name, angle[1].name, angle[2].name, angle[0].i, angle[1].i, angle[2].i, specie.mol.name)
 
     # DIHEDRALS
     f_mol['dihedrals'] = []
     if not is_rigid:
-      dihedrals = mol.get_all_dihedrals()
+      dihedrals = specie.mol.get_all_dihedrals()
       for dihedral in dihedrals:
-        a0_name = ff_.translate(dihedral[0].name)
-        a1_name = ff_.translate(dihedral[1].name)
-        a2_name = ff_.translate(dihedral[2].name)
-        a3_name = ff_.translate(dihedral[3].name)
+        a0_name = specie.ff.translate(dihedral[0].name)
+        a1_name = specie.ff.translate(dihedral[1].name)
+        a2_name = specie.ff.translate(dihedral[2].name)
+        a3_name = specie.ff.translate(dihedral[3].name)
 
         dihedral_with_name = (a0_name, a1_name, a2_name, a3_name)
-        if dihedral_with_name in ff_.dihedrals:
-          field_type = ff_.dihedrals[dihedral_with_name].field_type
-          par = ff_.dihedrals[dihedral_with_name].par
-          elec_1_4 = ff_.dihedrals[dihedral_with_name].elec_1_4
-          vdw__1_4 = ff_.dihedrals[dihedral_with_name].vdw_1_4
+        if dihedral_with_name in specie.ff.dihedrals:
+          field_type = specie.ff.dihedrals[dihedral_with_name].field_type
+          par = specie.ff.dihedrals[dihedral_with_name].par
+          elec_1_4 = specie.ff.dihedrals[dihedral_with_name].elec_1_4
+          vdw__1_4 = specie.ff.dihedrals[dihedral_with_name].vdw_1_4
           if field_type == 'harm':
             f_dihedr = {}
             f_dihedr['field_type'] = field_type
@@ -234,25 +280,25 @@ def write_dlpoly_field(cnf_xyz, mols, is_nonpatched=False, is_arithmetic=False):
             f_mol['dihedrals'].append(f_dihedr)
           else:
             logging.warning('Unknown dihedral field type %s for dihedral %s-%s-%s-%s %d-%d-%d-%d (in mol %s)', field_type, \
-                            dihedral[0].name, dihedral[1].name, dihedral[2].name, dihedral[3].name, dihedral[0].i, dihedral[1].i, dihedral[2].i, dihedral[3].i, mol.name)
+                            dihedral[0].name, dihedral[1].name, dihedral[2].name, dihedral[3].name, dihedral[0].i, dihedral[1].i, dihedral[2].i, dihedral[3].i, specie.mol.name)
         else:
           logging.warning('Unable to get infos about dihedral %s-%s-%s-%s %d-%d-%d-%d (in mol %s)', dihedral[0].name, dihedral[1].name, dihedral[2].name, dihedral[3].name, \
-                          dihedral[0].i, dihedral[1].i, dihedral[2].i, dihedral[3].i, mol.name)
+                          dihedral[0].i, dihedral[1].i, dihedral[2].i, dihedral[3].i, specie.mol.name)
 
     # IMPROPERS
     if not is_rigid:
-      for improper in mol.get_all_impropers():
-        a0_name = ff_.translate(improper[0].name)
-        a1_name = ff_.translate(improper[1].name)
-        a2_name = ff_.translate(improper[2].name)
-        a3_name = ff_.translate(improper[3].name)
+      for improper in specie.mol.get_all_impropers():
+        a0_name = specie.ff.translate(improper[0].name)
+        a1_name = specie.ff.translate(improper[1].name)
+        a2_name = specie.ff.translate(improper[2].name)
+        a3_name = specie.ff.translate(improper[3].name)
 
         improper_with_name = (a0_name, a1_name, a2_name, a3_name)
-        if improper_with_name in ff_.impropers:
-          field_type = ff_.impropers[improper_with_name].field_type
-          par = ff_.impropers[improper_with_name].par
-          elec_1_4 = ff_.impropers[improper_with_name].elec_1_4
-          vdw__1_4 = ff_.impropers[improper_with_name].vdw_1_4
+        if improper_with_name in specie.ff.impropers:
+          field_type = specie.ff.impropers[improper_with_name].field_type
+          par = specie.ff.impropers[improper_with_name].par
+          elec_1_4 = specie.ff.impropers[improper_with_name].elec_1_4
+          vdw__1_4 = specie.ff.impropers[improper_with_name].vdw_1_4
           if field_type == 'harm':
             f_dihedr = {}
             f_dihedr['field_type'] = field_type
@@ -306,10 +352,10 @@ def write_dlpoly_field(cnf_xyz, mols, is_nonpatched=False, is_arithmetic=False):
             f_mol['dihedrals'].append(f_dihedr)
           else:
             logging.warning('Unknown dihedral field type %s for improper %s-%s-%s-%s %d-%d-%d-%d (in mol %s)', field_type, \
-                            improper[0].name, improper[1].name, improper[2].name, improper[3].name, improper[0].i, improper[1].i, improper[2].i, improper[3].i, mol.name)
+                            improper[0].name, improper[1].name, improper[2].name, improper[3].name, improper[0].i, improper[1].i, improper[2].i, improper[3].i, specie.mol.name)
         else:
           logging.warning('Unable to get infos about improper %s-%s-%s-%s %d-%d-%d-%d (in mol %s)', improper[0].name, improper[1].name, improper[2].name, improper[3].name, \
-                          improper[0].i, improper[1].i, improper[2].i, improper[3].i, mol.name)
+                          improper[0].i, improper[1].i, improper[2].i, improper[3].i, specie.mol.name)
 
     field.mols.append(f_mol)
 
@@ -317,26 +363,26 @@ def write_dlpoly_field(cnf_xyz, mols, is_nonpatched=False, is_arithmetic=False):
 
   # Check if there's no two atoms with the same name and different VDW parameters
   vdws = {}
-  for (_, mol, ff_) in mols:
-    for atom in mol.atoms:
-      field_type = ff_.atoms[atom.name].field_type
-      par = ff_.atoms[atom.name].par
+  for specie in species:
+    for atom in specie.mol.atoms:
+      field_type = specie.ff.atoms[atom.name].field_type
+      par = specie.ff.atoms[atom.name].par
       if atom.name not in vdws:
         vdws[atom.name] = (field_type, par)
       else:
         (old_field_type, old_par) = vdws[atom.name]
         if field_type != old_field_type or par != old_par:
           logging.critical('Multiple different definition of VDW parameter for %s : %s/%s %s/%s', atom.name, old_field_type, field_type, old_par, par)
-          raise FatalError('Multiple different definition of VDW parameter for %s : %s/%s %s/%s' % (atom.name, old_field_type, field_type, old_par, par))
+          raise RuntimeError('Multiple different definition of VDW parameter for %s : %s/%s %s/%s' % (atom.name, old_field_type, field_type, old_par, par))
 
   field.vdws = []
   vdws_done = []
   all_atom_types = []
   # Get all combinations of atom name, but keeping ff to get infos
-  for (_, mol, ff_) in mols:
-    for atom in mol.atoms:
-      if (atom.name, ff_) not in all_atom_types:
-        all_atom_types.append((atom.name, ff_))
+  for specie in species:
+    for atom in specie.mol.atoms:
+      if (atom.name, specie.ff) not in all_atom_types:
+        all_atom_types.append((atom.name, specie.ff))
   combs = list(combinations_with_replacement(all_atom_types, 2))
 
   for comb in combs:
@@ -470,11 +516,11 @@ def write_dlpoly_config(cnf_xyz, margin):
 #########
 # LAMMPS
 
-def write_lammps_data_input(cnf_xyz, mols, margin, charge_ratio, is_separate, is_arithmetic, is_polar, drude_k, drude_m, free_type):
+def write_lammps_data_input(cnf_xyz, species, margin, charge_ratio, is_separate, is_arithmetic, is_polar, drude_k, drude_m, free_type):
   '''Write the LAMMPS file data.lmp and in.lmp'''
 
   # Get the first ff
-  ff_ = mols[0][2]
+  ff_ = species[0].ff
 
   if ff_.energy_unit == 'kj/mol':
     from_unit = 'kj/mol'
@@ -492,9 +538,8 @@ def write_lammps_data_input(cnf_xyz, mols, margin, charge_ratio, is_separate, is
   nb_impropers = 0
 
   nb_drudes = 0
-  nb_drude_types = 0
-  druded_atom_types = []
-
+  polar_atom_types = []
+  polar_atom_name = []
   atom_types = []
   bond_types = []
   bond_types_nb = {}
@@ -519,9 +564,9 @@ def write_lammps_data_input(cnf_xyz, mols, margin, charge_ratio, is_separate, is
 
   # Get atoms, bonds, angles, dihedrals and impropers from mols
   # And counts number total of each to decrease if not taken into account
-  for (nb, mol, ff_) in mols:
-    nb_atoms += nb * len(mol.atoms)
-    for atom in mol.atoms:
+  for specie in species:
+    nb_atoms += specie.nb * len(specie.mol.atoms)
+    for atom in specie.mol.atoms:
       if 'fr' in atom.fields and 'to' in atom.fields:
         is_free_energy = True
       if 'fr' not in atom.fields:
@@ -532,56 +577,58 @@ def write_lammps_data_input(cnf_xyz, mols, margin, charge_ratio, is_separate, is
         to = None
       else:
         to = atom.to
-      if (atom.name, ff_, fr, to) not in atom_types:
-        atom_types.append((atom.name, ff_, fr, to))
+      atom_type = AtomType(atom.name, specie.ff, fr, to)
+      if atom_type not in atom_types:
+        atom_type.i = len(atom_types) + 1
+        atom_types.append(atom_type)
 
-    bonds = mol.get_all_bonds()
-    nb_bonds += nb * len(bonds)
+    bonds = specie.mol.get_all_bonds()
+    nb_bonds += specie.nb * len(bonds)
     for (atom1, atom2) in bonds:
-      if ((atom1.name, atom2.name), ff_) not in bond_types and ((atom2.name, atom1.name), ff_) not in bond_types:
-        bond_types.append(((atom1.name, atom2.name), ff_))
-        bond_types_nb[((atom1.name, atom2.name), ff_)] = nb
+      if ((atom1.name, atom2.name), specie.ff) not in bond_types and ((atom2.name, atom1.name), specie.ff) not in bond_types:
+        bond_types.append(((atom1.name, atom2.name), specie.ff))
+        bond_types_nb[((atom1.name, atom2.name), specie.ff)] = specie.nb
       else:
-        if ((atom1.name, atom2.name), ff_) in bond_types_nb:
-          bond_types_nb[((atom1.name, atom2.name), ff_)] += nb
-        elif ((atom2.name, atom1.name), ff_) in bond_types_nb:
-          bond_types_nb[((atom2.name, atom1.name), ff_)] += nb
+        if ((atom1.name, atom2.name), specie.ff) in bond_types_nb:
+          bond_types_nb[((atom1.name, atom2.name), specie.ff)] += specie.nb
+        elif ((atom2.name, atom1.name), specie.ff) in bond_types_nb:
+          bond_types_nb[((atom2.name, atom1.name), specie.ff)] += specie.nb
 
-    angles = mol.get_all_angles()
-    nb_angles += nb * len(angles)
+    angles = specie.mol.get_all_angles()
+    nb_angles += specie.nb * len(angles)
     for (atom1, atom2, atom3) in angles:
-      if ((atom1.name, atom2.name, atom3.name), ff_) not in angle_types and ((atom3.name, atom2.name, atom1.name), ff_) not in angle_types:
-        angle_types.append(((atom1.name, atom2.name, atom3.name), ff_))
-        angle_types_nb[((atom1.name, atom2.name, atom3.name), ff_)] = nb
+      if ((atom1.name, atom2.name, atom3.name), specie.ff) not in angle_types and ((atom3.name, atom2.name, atom1.name), specie.ff) not in angle_types:
+        angle_types.append(((atom1.name, atom2.name, atom3.name), specie.ff))
+        angle_types_nb[((atom1.name, atom2.name, atom3.name), specie.ff)] = specie.nb
       else:
-        if ((atom1.name, atom2.name, atom3.name), ff_) in angle_types_nb:
-          angle_types_nb[((atom1.name, atom2.name, atom3.name), ff_)] += nb
-        elif ((atom3.name, atom2.name, atom1.name), ff_) in angle_types_nb:
-          angle_types_nb[((atom3.name, atom2.name, atom1.name), ff_)] += nb
+        if ((atom1.name, atom2.name, atom3.name), specie.ff) in angle_types_nb:
+          angle_types_nb[((atom1.name, atom2.name, atom3.name), specie.ff)] += specie.nb
+        elif ((atom3.name, atom2.name, atom1.name), specie.ff) in angle_types_nb:
+          angle_types_nb[((atom3.name, atom2.name, atom1.name), specie.ff)] += specie.nb
 
-    dihedrals = mol.get_all_dihedrals()
-    nb_dihedrals += nb * len(dihedrals)
+    dihedrals = specie.mol.get_all_dihedrals()
+    nb_dihedrals += specie.nb * len(dihedrals)
     for (atom1, atom2, atom3, atom4) in dihedrals:
-      if ((atom1.name, atom2.name, atom3.name, atom4.name), ff_) not in dihedral_types and ((atom4.name, atom3.name, atom2.name, atom1.name), ff_) not in dihedral_types:
-        dihedral_types.append(((atom1.name, atom2.name, atom3.name, atom4.name), ff_))
-        dihedral_types_nb[((atom1.name, atom2.name, atom3.name, atom4.name), ff_)] = nb
+      if ((atom1.name, atom2.name, atom3.name, atom4.name), specie.ff) not in dihedral_types and ((atom4.name, atom3.name, atom2.name, atom1.name), specie.ff) not in dihedral_types:
+        dihedral_types.append(((atom1.name, atom2.name, atom3.name, atom4.name), specie.ff))
+        dihedral_types_nb[((atom1.name, atom2.name, atom3.name, atom4.name), specie.ff)] = specie.nb
       else:
-        if ((atom1.name, atom2.name, atom3.name, atom4.name), ff_) in dihedral_types_nb:
-          dihedral_types_nb[((atom1.name, atom2.name, atom3.name, atom4.name), ff_)] += nb
-        elif ((atom4.name, atom3.name, atom2.name, atom1.name), ff_) in dihedral_types_nb:
-          dihedral_types_nb[((atom4.name, atom3.name, atom2.name, atom1.name), ff_)] += nb
+        if ((atom1.name, atom2.name, atom3.name, atom4.name), specie.ff) in dihedral_types_nb:
+          dihedral_types_nb[((atom1.name, atom2.name, atom3.name, atom4.name), specie.ff)] += specie.nb
+        elif ((atom4.name, atom3.name, atom2.name, atom1.name), specie.ff) in dihedral_types_nb:
+          dihedral_types_nb[((atom4.name, atom3.name, atom2.name, atom1.name), specie.ff)] += specie.nb
 
-    impropers = mol.get_all_impropers()
-    nb_impropers += nb * len(impropers)
+    impropers = specie.mol.get_all_impropers()
+    nb_impropers += specie.nb * len(impropers)
     for (atom1, atom2, atom3, atom4) in impropers:
-      if ((atom1.name, atom2.name, atom3.name, atom4.name), ff_) not in improper_types and ((atom4.name, atom3.name, atom2.name, atom1.name), ff_) not in improper_types:
-        improper_types.append(((atom1.name, atom2.name, atom3.name, atom4.name), ff_))
-        improper_types_nb[((atom1.name, atom2.name, atom3.name, atom4.name), ff_)] = nb
+      if ((atom1.name, atom2.name, atom3.name, atom4.name), specie.ff) not in improper_types and ((atom4.name, atom3.name, atom2.name, atom1.name), specie.ff) not in improper_types:
+        improper_types.append(((atom1.name, atom2.name, atom3.name, atom4.name), specie.ff))
+        improper_types_nb[((atom1.name, atom2.name, atom3.name, atom4.name), specie.ff)] = specie.nb
       else:
-        if ((atom1.name, atom2.name, atom3.name, atom4.name), ff_) in improper_types_nb:
-          improper_types_nb[((atom1.name, atom2.name, atom3.name, atom4.name), ff_)] += nb
-        elif ((atom4.name, atom3.name, atom2.name, atom1.name), ff_) in improper_types_nb:
-          improper_types_nb[((atom4.name, atom3.name, atom2.name, atom1.name), ff_)] += nb
+        if ((atom1.name, atom2.name, atom3.name, atom4.name), specie.ff) in improper_types_nb:
+          improper_types_nb[((atom1.name, atom2.name, atom3.name, atom4.name), specie.ff)] += specie.nb
+        elif ((atom4.name, atom3.name, atom2.name, atom1.name), specie.ff) in improper_types_nb:
+          improper_types_nb[((atom4.name, atom3.name, atom2.name, atom1.name), specie.ff)] += specie.nb
 
   pair_input_lines = []
 
@@ -608,131 +655,152 @@ def write_lammps_data_input(cnf_xyz, mols, margin, charge_ratio, is_separate, is
   data.box[2] = (min_z, max_z)
 
   # ATOM TYPES
-  for (atom_type, ff_, fr, to) in atom_types:
-    if atom_type not in ff_.atoms:
-      logging.critical('Unable to get infos about atom %s', atom_type)
-      raise FatalError('Unable to get infos about atom %s' % atom_type)
-    is_druded = False
+  for atom_type in atom_types:
     if is_polar:
-      polarizability = ff_.atoms[atom_type].polarizability
-      if polarizability > 0.0:
-        nb_drude_types += 1
-        is_druded = True
-        druded_atom_types.append(atom_type)
+      if atom_type.is_polar:
+        atom_type.is_polar = True
+        polar_atom_types.append(atom_type)
+        atom_type.i_drude = len(atom_types) + len(polar_atom_types)
 
-    if is_druded:
-      mass = ff_.atoms[atom_type].mass - drude_m
-      comment = atom_type
+    if is_polar and atom_type.is_polar:
+      mass = atom_type.mass - drude_m
+      comment = atom_type.name
     else:
-      mass = ff_.atoms[atom_type].mass
-      if fr != None and to != None and not is_reverse_free:
-        comment = '%s->%s' % (fr, to)
-      elif fr != None and to != None and is_reverse_free:
-        comment = '%s->%s' % (to, fr)
-      elif fr == None and to != None and not is_reverse_free:
-        comment = 'D->%s' % to
-      elif fr == None and to != None and is_reverse_free:
-        comment = '%s->D' % to
-      elif fr != None and to == None and not is_reverse_free:
-        comment = '%s->D' % fr
-      elif fr != None and to == None and is_reverse_free:
-        comment = 'D->%s' % fr
+      mass = atom_type.mass
+      if atom_type.fr != None and atom_type.to != None and not is_reverse_free:
+        comment = '%s->%s' % (atom_type.fr, atom_type.to)
+      elif atom_type.fr != None and atom_type.to != None and is_reverse_free:
+        comment = '%s->%s' % (atom_type.to, atom_type.fr)
+      elif atom_type.fr == None and atom_type.to != None and not is_reverse_free:
+        comment = 'D->%s' % atom_type.to
+      elif atom_type.fr == None and atom_type.to != None and is_reverse_free:
+        comment = '%s->D' % atom_type.to
+      elif atom_type.fr != None and atom_type.to == None and not is_reverse_free:
+        comment = '%s->D' % atom_type.fr
+      elif atom_type.fr != None and atom_type.to == None and is_reverse_free:
+        comment = 'D->%s' % atom_type.fr
       else:
-        comment = atom_type
+        comment = atom_type.name
 
     # No pair_coeff in data for polar or free energy
     if is_polar or is_free_energy:
       coeffs = None
     else:
-      field_type = ff_.atoms[atom_type].field_type
-      par = ff_.atoms[atom_type].par
+      field_type = atom_type.field_type
+      par = atom_type.par
       if field_type != 'lj':
-        logging.critical('Unknown vdw field type %s for atom %s', field_type, atom_type)
-        raise FatalError('Unknown vdw field type %s for atom %s', field_type, atom_type)
+        logging.critical('Unknown vdw field type %s for atom %s', field_type, atom_type.name)
+        raise RuntimeError('Unknown vdw field type %s for atom %s', field_type, atom_type.name)
       coeffs = (convert_energy(from_unit, to_unit, par['epsilon']), par['sigma'])
 
-    data.add_atom_type(mass, coeffs, comment)
+    if not is_polar:
+      data.add_atom_type(mass, coeffs, comment)
+    else:
+      if atom_type.is_polar:
+        data.add_atom_type(mass, coeffs, comment, 1)
+      else:
+        data.add_atom_type(mass, coeffs, comment, 0)
+
+  polar_atom_names = [atom_type.name for atom_type in polar_atom_types]
 
   # Drudes
-  for i in xrange(1, nb_drude_types + 1):
-    mass = drude_m
-    comment = 'D_%s' % druded_atom_types[i - 1]
-    data.add_atom_type(mass, (0.0, 0.0), comment)
-
-  if is_polar and nb_drude_types == 0:
+  if is_polar and len(polar_atom_types) == 0:
     logging.critical('Polar option but no atoms are polarizable')
-    raise FatalError('Polar option but no atoms are polarizable')
+    raise RuntimeError('Polar option but no atoms are polarizable')
+
+  for atom_type in polar_atom_types:
+    mass = drude_m
+    comment = 'D_%s' % atom_type.name
+    data.add_atom_type(mass, (0.0, 0.0), comment, 2)
 
   # Count total nb of drudes
-  for (nb, mol, ff_) in mols:
-    for atom in mol.atoms:
-      if atom.name in druded_atom_types:
-        nb_drudes += nb
+  if is_polar:
+    for specie in species:
+      for atom in specie.mol.atoms:
+        if atom.name in polar_atom_names:
+          nb_drudes += specie.nb
 
   # VDW
   if is_polar:
-    i = 1
-    j = 1
-    for (atom_type1, ff_1, fr1, to1) in atom_types:
-      for (atom_type2, ff_2, fr2, to2) in atom_types:
-        if j > i:
-          i += 1
+    for atom_type1 in atom_types:
+      for atom_type2 in atom_types:
+        if atom_type1.i > atom_type2.i:
           continue
-        if atom_type1 not in ff_1.atoms or atom_type2 not in ff_2.atoms:
-          logging.critical('Unable to get infos about atom %s or %s', atom_type1, atom_type2)
-          raise FatalError('Unable to get infos about atom %s or %s', atom_type1, atom_type2)
-        field_type1 = ff_1.atoms[atom_type1].field_type
-        field_type2 = ff_2.atoms[atom_type2].field_type
-        par1 = ff_1.atoms[atom_type1].par
-        par2 = ff_2.atoms[atom_type2].par
-        if field_type1 != 'lj' or field_type2 != 'lj':
-          logging.critical('Unknown vdw field type %s for atom %s or field type %s for atom %s', field_type1, atom_type1, field_type2, atom_type2)
-          raise FatalError('Unknown vdw field type %s for atom %s or field type %s for atom %s', field_type1, atom_type1, field_type2, atom_type2)
+        if atom_type.field_type != 'lj' or atom_type.field_type != 'lj':
+          logging.critical('Unknown vdw field type %s for atom %s or field type %s for atom %s', atom_type1.field_type, atom_type1.name, atom_type2.field_type, atom_type2.name)
+          raise RuntimeError('Unknown vdw field type %s for atom %s or field type %s for atom %s', atom_type1.field_type, atom_type1.name, atom_type2.field_type, atom_type2.name)
 
         # If polar, vdw params are in control because of hybrid/overlay
-        epsilon = convert_energy(from_unit, to_unit, math.sqrt(par1['epsilon'] * par2['epsilon']))
+        epsilon = convert_energy(from_unit, to_unit, math.sqrt(atom_type1.par['epsilon'] * atom_type2.par['epsilon']))
         if is_arithmetic:
-          sigma = (par1['sigma'] + par2['sigma']) / 2.0
+          sigma = (atom_type1.par['sigma'] + atom_type2.par['sigma']) / 2.0
         else:
-          sigma = math.sqrt(par1['sigma'] * par2['sigma'])
-        pair_input_lines.append('pair_coeff %4d %4d lj/cut/coul/long %f %f # %s %s' % (j, i, epsilon, sigma, atom_type1, atom_type2))
-        i += 1
-      i = 1
-      j += 1
+          sigma = math.sqrt(atom_type1.par['sigma'] * atom_type2.par['sigma'])
+        pair_input_lines.append('pair_coeff %4d %4d lj/cut/coul/long %f %f # %s %s' % (atom_type1.i, atom_type2.i, epsilon, sigma, atom_type1.name, atom_type2.name))
 
-    pair_input_lines.append('pair_coeff    *  %d*%d lj/cut/coul/long %f %f # No lj for drudes' % (len(atom_types) + 1, nb_drude_types + len(atom_types), 0.0, 0.0))
-    i = 1
-    for (atom_type, ff_, fr, to) in atom_types:
-      thole = ff_.atoms[atom_type].thole
-      polar = ff_.atoms[atom_type].polarizability
-      if polar != 0.0:
-        pair_input_lines.append('pair_coeff %4d    * thole %f %f' % (i, thole, polar))
-      i += 1
-    for i in xrange(1, nb_drude_types + 1):
-      core_atom_type = druded_atom_types[i - 1]
-      thole = ff_.atoms[core_atom_type].thole
-      polar = ff_.atoms[core_atom_type].polarizability
-      pair_input_lines.append('pair_coeff %4d    * thole %f %f' % (len(atom_types) + i, thole, polar))
+    # Get an arbitrary global thole value
+    global_thole = polar_atom_types[0].thole
+
+    pair_input_lines.append('pair_coeff    *  %d*%d lj/cut/coul/long %f %f # No lj for drudes' % (len(atom_types) + 1, len(polar_atom_types) + len(atom_types), 0.0, 0.0))
+    for atom_type1 in atom_types:
+
+      # Add Core-Core coeffs
+      for atom_type2 in atom_types:
+        if atom_type1.i > atom_type2.i:
+          continue
+        thole1 = atom_type1.thole
+        polar1 = atom_type1.polarizability
+        thole2 = atom_type2.thole
+        polar2 = atom_type2.polarizability
+        thole = (thole1 + thole2) / 2.0
+        polar = math.sqrt(polar1 * polar2)
+        if polar1 != 0.0 and polar2 != 0.0:
+          if thole != global_thole:
+            pair_input_lines.append('pair_coeff %4d %4d thole %f %f' % (atom_type1.i, atom_type2.i, polar, thole))
+          else:
+            pair_input_lines.append('pair_coeff %4d %4d thole %f' % (atom_type1.i, atom_type2.i, polar))
+
+      # Add Core-Drude coeffs
+      for atom_type2 in polar_atom_types:
+        thole2 = atom_type2.thole
+        polar2 = atom_type2.polarizability
+        thole = (thole1 + thole2) / 2.0
+        polar = math.sqrt(polar1 * polar2)
+        if polar1 != 0.0 and polar2 != 0.0:
+          if thole != global_thole:
+            pair_input_lines.append('pair_coeff %4d %4d thole %f %f' % (atom_type1.i, atom_type2.i_drude, polar, thole))
+          else:
+            pair_input_lines.append('pair_coeff %4d %4d thole %f' % (atom_type1.i, atom_type2.i_drude, polar))
+
+    # Add Drude-Drude coeffs
+    for atom_type1 in polar_atom_types:
+      for atom_type2 in polar_atom_types:
+        if atom_type1.i > atom_type2.i:
+          continue
+        thole1 = atom_type1.thole
+        polar1 = atom_type1.polarizability
+        thole2 = atom_type2.thole
+        polar2 = atom_type2.polarizability
+        thole = (thole1 + thole2) / 2.0
+        polar = math.sqrt(polar1 * polar2)
+        if thole != global_thole:
+          pair_input_lines.append('pair_coeff %4d %4d thole %f %f' % (atom_type1.i_drude, atom_type2.i_drude, polar, thole))
+        else:
+          pair_input_lines.append('pair_coeff %4d %4d thole %f' % (atom_type1.i_drude, atom_type2.i_drude, polar))
 
   elif is_free_energy:
     # Vdw params are in control because of hybrid/overlay
-    i = 1
-    j = 1
-    for (atom_type1, ff_1, fr1, to1) in atom_types:
-      for (atom_type2, ff_2, fr2, to2) in atom_types:
-        if j > i:
-          i += 1
+    for atom_type1 in atom_types:
+      for atom_type2 in atom_types:
+        if atom_type1.i > atom_type2.i:
           continue
-        if atom_type1 not in ff_1.atoms or atom_type2 not in ff_2.atoms:
-          logging.critical('Unable to get infos about atom %s or %s', atom_type1, atom_type2)
-          raise FatalError('Unable to get infos about atom %s or %s', atom_type1, atom_type2)
-        field_type1 = ff_1.atoms[atom_type1].field_type
-        field_type2 = ff_2.atoms[atom_type2].field_type
-        par1 = ff_1.atoms[atom_type1].par
-        par2 = ff_2.atoms[atom_type2].par
+        field_type1 = atom_type1.field_type
+        field_type2 = atom_type2.field_type
+        par1 = atom_type1.par
+        par2 = atom_type2.par
         if field_type1 != 'lj' or field_type2 != 'lj':
-          logging.critical('Unknown vdw field type %s for atom %s or field type %s for atom %s', field_type1, atom_type1, field_type2, atom_type2)
-          raise FatalError('Unknown vdw field type %s for atom %s or field type %s for atom %s', field_type1, atom_type1, field_type2, atom_type2)
+          logging.critical('Unknown vdw field type %s for atom %s or field type %s for atom %s', field_type1, atom_type1.name, field_type2, atom_type2.name)
+          raise RuntimeError('Unknown vdw field type %s for atom %s or field type %s for atom %s', field_type1, atom_type1.name, field_type2, atom_type2.name)
 
         epsilon = convert_energy(from_unit, to_unit, math.sqrt(par1['epsilon'] * par2['epsilon']))
         if is_arithmetic:
@@ -741,49 +809,49 @@ def write_lammps_data_input(cnf_xyz, mols, margin, charge_ratio, is_separate, is
           sigma = math.sqrt(par1['sigma'] * par2['sigma'])
 
         # 0 : no dummy, 1 : dummy (D-), 2 : todummy (-D), 3 : transform
-        if fr1 is None and to1 is None:
+        if atom_type1.fr is None and atom_type1.to is None:
           dummy1 = 0
-          comment1 = atom_type1
-        elif fr1 is not None and to1 is not None:
+          comment1 = atom_type1.name
+        elif atom_type1.fr is not None and atom_type1.to is not None:
           dummy1 = 3
           if is_reverse_free:
-            comment1 = to1 + '->' + fr1
+            comment1 = atom_type1.to + '->' + atom_type1.fr
           else:
-            comment1 = fr1 + '->' + to1
-        elif fr1 is not None:
+            comment1 = atom_type1.fr + '->' + atom_type1.to
+        elif atom_type1.fr is not None:
           dummy1 = 1
           if is_reverse_free:
-            comment1 = 'D->' + fr1
+            comment1 = 'D->' + atom_type1.fr
           else:
-            comment1 = fr1 + '->D'
+            comment1 = atom_type1.fr + '->D'
         else:
           dummy1 = 2
           if is_reverse_free:
-            comment1 = to1 + '->D'
+            comment1 = atom_type1.to + '->D'
           else:
-            comment1 = 'D->' + to1
+            comment1 = 'D->' + atom_type1.to
 
-        if fr2 is None and to2 is None:
+        if atom_type2.fr is None and atom_type2.to is None:
           dummy2 = 0
-          comment2 = atom_type2
-        elif fr2 is not None and to2 is not None:
+          comment2 = atom_type2.name
+        elif atom_type2.fr is not None and atom_type2.to is not None:
           dummy2 = 3
           if is_reverse_free:
-            comment2 = to2 + '->' + fr2
+            comment2 = atom_type2.to + '->' + atom_type2.fr
           else:
-            comment2 = fr2 + '->' + to2
-        elif fr2 is not None:
+            comment2 = atom_type2.fr + '->' + atom_type2.to
+        elif atom_type2.fr is not None:
           dummy2 = 1
           if is_reverse_free:
-            comment2 = 'D->' + fr2
+            comment2 = 'D->' + atom_type2.fr
           else:
-            comment2 = fr2 + '->D'
+            comment2 = atom_type2.fr + '->D'
         else:
           dummy2 = 2
           if is_reverse_free:
-            comment2 = to2 + '->D'
+            comment2 = atom_type2.to + '->D'
           else:
-            comment2 = 'D->' + to2
+            comment2 = 'D->' + atom_type2.to
 
         if is_reverse_free:
           if dummy1 == 1:
@@ -800,28 +868,28 @@ def write_lammps_data_input(cnf_xyz, mols, margin, charge_ratio, is_separate, is
         no_interact = False
         mols1 = []
         mols2 = []
-        for (nb, mol, ff_) in mols:
-          if nb != 1:
+        for specie in species:
+          if specie.nb != 1:
             continue
-          for atom in mol.atoms:
-            if atom.name == atom_type1 and atom.to == to1 and mol not in mols1:
-              mols1.append(mol)
-            if atom.name == atom_type2 and atom.to == to2 and mol not in mols2:
-              mols2.append(mol)
+          for atom in specie.mol.atoms:
+            if atom.name == atom_type1.name and atom.to == atom_type1.to and specie.mol not in mols1:
+              mols1.append(specie.mol)
+            if atom.name == atom_type2.name and atom.to == atom_type2.to and specie.mol not in mols2:
+              mols2.append(specie.mol)
         if len(mols1) == 1 and mols1 == mols2:
           # Check if the atoms are 1-3 max (then no interaction)
           mol = mols1[0]
           for atom in mol.atoms:
-            if atom.name == atom_type1 and atom.to == to1:
+            if atom.name == atom_type1.name and atom.to == atom_type1.to:
               atom1 = atom
           for neighb1 in atom1.neighbs:
             # 1-2
-            if neighb1.name == atom_type2 and neighb1.to == to2:
+            if neighb1.name == atom_type2.name and neighb1.to == atom_type2.to:
               no_interact = True
               break
             for neighb2 in neighb1.neighbs:
               # 1-3
-              if neighb2.name == atom_type2 and neighb2.to == to2:
+              if neighb2.name == atom_type2.name and neighb2.to == atom_type2.to:
                 no_interact = True
                 break
             if no_interact:
@@ -829,24 +897,20 @@ def write_lammps_data_input(cnf_xyz, mols, margin, charge_ratio, is_separate, is
 
         # No interaction between dummy and to be dummy atoms
         if (dummy1 == 1 and dummy2 == 2) or (dummy1 == 2 and dummy2 == 1) or no_interact:
-          pair_input_lines.append('pair_coeff %4d %4d none # %s %s' % (j, i, comment1, comment2))
+          pair_input_lines.append('pair_coeff %4d %4d none # %s %s' % (atom_type1.i, atom_type2.i, comment1, comment2))
         # Soft interaction with 1 for normal to dummy
         elif ((dummy1 == 0 or dummy1 == 3) and dummy2 == 1) or (dummy1 == 1 and (dummy2 == 0 or dummy2 == 3)):
-          pair_input_lines.append('pair_coeff %4d %4d lj/cut/coul/long/soft %f %f 1.0 # %s %s' % (j, i, epsilon, sigma, comment1, comment2))
-          soft_0.append((j, i))
+          pair_input_lines.append('pair_coeff %4d %4d lj/cut/coul/long/soft %f %f 1.0 # %s %s' % (atom_type1.i, atom_type2.i, epsilon, sigma, comment1, comment2))
+          soft_0.append((atom_type1.i, atom_type2.i))
         # Soft interaction with 0 for normal to todummy
         elif ((dummy1 == 0 or dummy1 == 3) and dummy2 == 2) or (dummy1 == 2 and (dummy2 == 0 or dummy2 == 3)):
-          pair_input_lines.append('pair_coeff %4d %4d lj/cut/coul/long/soft %f %f 0.0 # %s %s' % (j, i, epsilon, sigma, comment1, comment2))
-          soft_1.append((j, i))
+          pair_input_lines.append('pair_coeff %4d %4d lj/cut/coul/long/soft %f %f 0.0 # %s %s' % (atom_type1.i, atom_type2.i, epsilon, sigma, comment1, comment2))
+          soft_1.append((atom_type1.i, atom_type2.i))
         # Normal case
         else:
-          pair_input_lines.append('pair_coeff %4d %4d lj/cut/coul/long      %f %f # %s %s' % (j, i, epsilon, sigma, comment1, comment2))
-        i += 1
-      i = 1
-      j += 1
+          pair_input_lines.append('pair_coeff %4d %4d lj/cut/coul/long      %f %f # %s %s' % (atom_type1.i, atom_type2.i, epsilon, sigma, comment1, comment2))
 
   # BOND TYPES
-  druded_i_bond = []
   for (bond_type, ff_) in bond_types:
     b0_name = ff_.translate(bond_type[0])
     b1_name = ff_.translate(bond_type[1])
@@ -855,12 +919,11 @@ def write_lammps_data_input(cnf_xyz, mols, margin, charge_ratio, is_separate, is
     if bond_with_name in ff_.bonds:
       field_type = ff_.bonds[bond_with_name].field_type
       par = ff_.bonds[bond_with_name].par
-      comment = '-'.join(bond_type)
       # / 2.0 because k includes the / 2.0 (not the case with dl_poly)
       if field_type == 'harm':
-        data.add_bond_type((convert_energy(from_unit, to_unit, par['k'] / 2.0), par['r']), comment, atom_names=(bond_type[0], bond_type[1]))
+        data.add_bond_type((convert_energy(from_unit, to_unit, par['k'] / 2.0), par['r']), 'auto', bond_type)
       elif field_type == 'cstr':
-        i = data.add_bond_type((convert_energy(from_unit, to_unit, par['k'] / 2.0), par['r']), comment, atom_names=(bond_type[0], bond_type[1]))
+        i = data.add_bond_type((convert_energy(from_unit, to_unit, par['k'] / 2.0), par['r']), 'auto', bond_type)
         i_bond_cstrs.append(i)
       else:
         logging.warning('Unknown bond field type %s for bond %s', field_type, '-'.join(bond_type))
@@ -868,14 +931,11 @@ def write_lammps_data_input(cnf_xyz, mols, margin, charge_ratio, is_separate, is
     else:
       logging.warning('Unable to get infos about bond %s', '-'.join(bond_type))
       discard_bonds.append((bond_type, ff_))
+  # Add drude bond
   if is_polar:
-    # Compute k according to polarizability
-    for (atom_type, ff_, fr, to) in atom_types:
-      if atom_type not in druded_atom_types:
-        continue
-      comment = 'D_%s' % atom_type
-      i = data.add_bond_type((drude_k, 0.0), comment, atom_names=(atom_type, 'D_%s' % atom_type))
-      druded_i_bond.append(i)
+    for atom_type in polar_atom_types:
+      comment = 'D_%s' % atom_type.name
+      data.add_bond_type((drude_k, 0.0), comment, (atom_type.name, 'D_%s' % atom_type.name))
 
 
   # ANGLE TYPES
@@ -888,12 +948,11 @@ def write_lammps_data_input(cnf_xyz, mols, margin, charge_ratio, is_separate, is
     if angle_with_name in ff_.angles:
       field_type = ff_.angles[angle_with_name].field_type
       par = ff_.angles[angle_with_name].par
-      comment = '-'.join(angle_type)
       # / 2.0 because k includes the / 2.0 (not the case with dl_poly)
       if field_type == 'harm':
-        data.add_angle_type((convert_energy(from_unit, to_unit, par['k'] / 2.0), par['theta']), comment, atom_names=(angle_type[0], angle_type[1], angle_type[2]))
+        data.add_angle_type((convert_energy(from_unit, to_unit, par['k'] / 2.0), par['theta']), 'auto', angle_type)
       elif field_type == 'cstr':
-        i = data.add_angle_type((convert_energy(from_unit, to_unit, par['k'] / 2.0), par['theta']), comment, atom_names=(angle_type[0], angle_type[1], angle_type[2]))
+        i = data.add_angle_type((convert_energy(from_unit, to_unit, par['k'] / 2.0), par['theta']), 'auto', angle_type)
         i_angle_cstrs.append(i)
       else:
         logging.warning('Unknown angle field type %s for angle %s', field_type, '-'.join(angle_type))
@@ -934,7 +993,6 @@ def write_lammps_data_input(cnf_xyz, mols, margin, charge_ratio, is_separate, is
       else:
         field_type = ff_.dihedrals[dihedral_with_name].field_type
         par = ff_.dihedrals[dihedral_with_name].par
-      comment = '-'.join(dihedral_type)
 
       # Check 1_4 params
       if not is_improper:
@@ -949,18 +1007,18 @@ def write_lammps_data_input(cnf_xyz, mols, margin, charge_ratio, is_separate, is
       # cos3 cos4 are opls in lammps
       if field_type == 'cos3':
         data.add_dihedral_type((convert_energy(from_unit, to_unit, par['A1']), convert_energy(from_unit, to_unit, par['A2']), convert_energy(from_unit, to_unit, par['A3']), 0.0), \
-                               comment, 'opls', atom_names=(dihedral_type[0], dihedral_type[1], dihedral_type[2], dihedral_type[3]), is_improper=is_improper)
+                               'auto', 'opls', dihedral_type, is_improper)
         if 'opls' not in dihedral_styles:
           dihedral_styles.append('opls')
       elif field_type == 'cos4' or field_type == 'opls':
         data.add_dihedral_type((convert_energy(from_unit, to_unit, par['A1']), convert_energy(from_unit, to_unit, par['A2']), \
                                convert_energy(from_unit, to_unit, par['A3']), convert_energy(from_unit, to_unit, par['A4'])), \
-                               comment, 'opls', atom_names=(dihedral_type[0], dihedral_type[1], dihedral_type[2], dihedral_type[3]), is_improper=is_improper)
+                               'auto', 'opls', dihedral_type, is_improper)
         if 'opls' not in dihedral_styles:
           dihedral_styles.append('opls')
       elif field_type == 'charmm':
         data.add_dihedral_type((convert_energy(from_unit, to_unit, par['K']), par['n'], par['d'], 0.0), \
-                               comment, 'charmm', atom_names=(dihedral_type[0], dihedral_type[1], dihedral_type[2], dihedral_type[3]), is_improper=is_improper)
+                               'auto', 'charmm', dihedral_type, is_improper)
         if 'charmm' not in dihedral_styles:
           dihedral_styles.append('charmm')
       else:
@@ -983,17 +1041,16 @@ def write_lammps_data_input(cnf_xyz, mols, margin, charge_ratio, is_separate, is
       if improper_with_name in ff_.impropers:
         field_type = ff_.impropers[improper_with_name].field_type
         par = ff_.impropers[improper_with_name].par
-        comment = '-'.join(improper_type)
 
         # cos3 cos4 are opls in lammps
         if field_type == 'cos3':
           data.add_improper_type((convert_energy(from_unit, to_unit, par['A1']), convert_energy(from_unit, to_unit, par['A2']), \
                                  convert_energy(from_unit, to_unit, par['A3']), 0.0), \
-                                 comment, atom_names=(improper_type[0], improper_type[1], improper_type[2], improper_type[3]))
+                                 'auto', improper_type)
         elif field_type == 'cos4' or field_type == 'opls':
           data.add_improper_type((convert_energy(from_unit, to_unit, par['A1']), convert_energy(from_unit, to_unit, par['A2']), \
                                  convert_energy(from_unit, to_unit, par['A3']), convert_energy(from_unit, to_unit, par['A4'])), \
-                                 comment, atom_names=(improper_type[0], improper_type[1], improper_type[2], improper_type[3]))
+                                 'auto', improper_type)
         else:
           logging.warning('Unknown improper field type %s for improper %s', field_type, '-'.join(improper_type))
           discard_impropers.append((improper_type, ff_))
@@ -1051,7 +1108,10 @@ def write_lammps_data_input(cnf_xyz, mols, margin, charge_ratio, is_separate, is
   fi.write('units real\n')
   fi.write('boundary p p p\n\n')
 
-  fi.write('atom_style full\n')
+  if is_polar:
+    fi.write('atom_style drude\n')
+  else:
+    fi.write('atom_style full\n')
 
   if nb_bonds + nb_drudes:
     fi.write('bond_style harmonic\n')
@@ -1070,26 +1130,90 @@ def write_lammps_data_input(cnf_xyz, mols, margin, charge_ratio, is_separate, is
 
   # Only one 1-4 parameter
   if len(elec_1_4s) == 0 and len(vdw_1_4s) == 0:
-    fi.write('special_bonds lj/coul 0.0 0.0 0.5\n')
+    fi.write('special_bonds lj/coul 0.0 0.0 0.5')
   elif len(elec_1_4s) == 1 and len(vdw_1_4s) == 1:
     if elec_1_4s[0] == vdw_1_4s[0]:
-      fi.write('special_bonds lj/coul 0.0 0.0 %.1f\n' % elec_1_4s[0])
+      fi.write('special_bonds lj/coul 0.0 0.0 %.1f' % elec_1_4s[0])
     else:
-      fi.write('special_bonds coul 0.0 0.0 %.1f\n' % elec_1_4s[0])
-      fi.write('special_bonds lj 0.0 0.0 %.1f\n' % vdw_1_4s[0])
+      fi.write('special_bonds coul 0.0 0.0 %.1f' % elec_1_4s[0])
+      fi.write('special_bonds lj 0.0 0.0 %.1f' % vdw_1_4s[0])
   else:
     if len(elec_1_4s) == 1:
-      fi.write('special_bonds coul 0.0 0.0 %.1f\n' % elec_1_4s[0])
+      fi.write('special_bonds coul 0.0 0.0 %.1f' % elec_1_4s[0])
     elif len(elec_1_4s) >= 1:
       logging.warning('Multiple 1-4 elec params : %s', ' '.join([str(p) for p in elec_1_4s]))
     if len(vdw_1_4s) == 1:
-      fi.write('special_bonds vdw 0.0 0.0 %.1f\n' % vdw_1_4s[0])
+      fi.write('special_bonds vdw 0.0 0.0 %.1f' % vdw_1_4s[0])
     elif len(vdw_1_4s) > 1:
       logging.warning('Multiple 1-4 vdw params : %s', ' '.join([str(p) for p in vdw_1_4s]))
+
+  if is_polar:
+    # Add extra for drudes if need more space for 1-2 1-3 1-4
+    max_121314 = 0
+    max_121314_d = 0
+    for specie in species:
+      for atom in specie.mol.atoms:
+        set_121314 = set()
+        set_121314_d = set()
+        for (atom1, atom2, atom3, atom4) in specie.mol.get_all_dihedrals():
+          if atom == atom1:
+            set_121314.add(atom4.name + str(atom4.i))
+            set_121314_d.add(atom4.name + str(atom4.i))
+            if atom4.name in polar_atom_names:
+              set_121314_d.add(atom4.name + str(atom4.i) + 'D')
+          if atom == atom4:
+            set_121314.add(atom1.name + str(atom1.i))
+            set_121314_d.add(atom1.name + str(atom1.i))
+            if atom1.name in polar_atom_names:
+              set_121314_d.add(atom1.name + str(atom1.i) + 'D')
+
+        for (atom1, atom2, atom3) in specie.mol.get_all_angles():
+          if atom == atom1:
+            set_121314.add(atom3.name + str(atom3.i))
+            set_121314_d.add(atom3.name + str(atom3.i))
+            if atom3.name in polar_atom_names:
+              set_121314.add(atom3.name + str(atom3.i) + 'D')
+              set_121314_d.add(atom3.name + str(atom3.i) + 'D')
+          if atom == atom3:
+            set_121314.add(atom1.name + str(atom1.i))
+            set_121314_d.add(atom1.name + str(atom1.i))
+            if atom1.name in polar_atom_names:
+              set_121314.add(atom1.name + str(atom1.i) + 'D')
+              set_121314_d.add(atom1.name + str(atom1.i) + 'D')
+
+        for (atom1, atom2) in specie.mol.get_all_bonds():
+          if atom == atom1:
+            set_121314.add(atom2.name + str(atom2.i))
+            set_121314_d.add(atom2.name + str(atom2.i))
+            if atom2.name in polar_atom_names:
+              set_121314.add(atom2.name + str(atom2.i) + 'D')
+              set_121314_d.add(atom2.name + str(atom2.i) + 'D')
+          if atom == atom2:
+            set_121314.add(atom1.name + str(atom2.i))
+            set_121314_d.add(atom1.name + str(atom2.i))
+            if atom1.name in polar_atom_names:
+              set_121314.add(atom1.name + str(atom2.i) + 'D')
+              set_121314_d.add(atom1.name + str(atom2.i) + 'D')
+
+        if atom.name in polar_atom_names:
+          set_121314.add(atom.name + str(atom.i) + 'D')
+          set_121314_d.add(atom.name + str(atom.i) + 'D')
+
+        if len(set_121314) > max_121314:
+          max_121314 = len(set_121314)
+        if len(set_121314_d) > max_121314_d:
+          max_121314_d = len(set_121314_d)
+
+    if max_121314_d - max_121314 > 0:
+      fi.write(' extra %d\n' % (max_121314_d - max_121314))
+    else:
+      fi.write('\n')
+  else:
+    fi.write('\n')
   fi.write('\n')
 
   if is_polar:
-    fi.write('pair_style hybrid/overlay lj/cut/coul/long 8.0 8.0 thole 8.0\n')
+    fi.write('pair_style hybrid/overlay lj/cut/coul/long 8.0 8.0 thole %.3f 8.0\n' % global_thole)
   elif is_free_energy:
     fi.write('pair_style hybrid lj/cut/coul/long 8.0 8.0 lj/cut/coul/long/soft 1 0.5 10.0 8.0 8.0\n')
   else:
@@ -1104,24 +1228,21 @@ def write_lammps_data_input(cnf_xyz, mols, margin, charge_ratio, is_separate, is
 
   fi.write('\n')
 
+  fi.write('read_data data.lmp\n')
   if is_polar:
-    fi.write('fix Extras all property/atom i_drudetype i_drudeid ghost yes\n')
-    fi.write('read_data data.lmp fix Extras NULL Extras\n')
     fi.write('\n')
     fi.write('comm_modify vel yes\n')
     fi.write('\n')
-  else:
-    fi.write('read_data data.lmp\n')
 
   # Groups
   i = 1
-  for (nb, mol, ff_) in mols:
-    group_name = mol.name.upper().replace('+', '').replace('-', '')
-    fi.write('group g%s molecule %d:%d\n' % (group_name, i, i + nb - 1))
-    i += nb
+  for specie in species:
+    group_name = specie.mol.name.upper().replace('+', '').replace('-', '')
+    fi.write('group g%s molecule %d:%d\n' % (group_name, i, i + specie.nb - 1))
+    i += specie.nb
   if is_polar:
     fi.write('group gATOMS type %s\n' % ' '.join([str(t) for t in xrange(1, len(atom_types) + 1)]))
-    fi.write('group gDRUDES type %s\n' % ' '.join([str(t) for t in xrange(len(atom_types) + 1, nb_drude_types + len(atom_types) + 1)]))
+    fi.write('group gDRUDES type %s\n' % ' '.join([str(t) for t in xrange(len(atom_types) + 1, len(polar_atom_types) + len(atom_types) + 1)]))
   fi.write('\n')
 
   # VDW in INPUT
@@ -1167,7 +1288,6 @@ def write_lammps_data_input(cnf_xyz, mols, margin, charge_ratio, is_separate, is
 
   # Compute
   if is_polar:
-    fi.write('compute cEXTRA all property/atom i_drudetype i_drudeid\n')
     fi.write('compute cTEMP_DRUDE gDRUDES temp\n')
     fi.write('compute cTEMP_DRUDE_DRUDE gDRUDES temp/drude\n')
     fi.write('compute cTEMP_ATOM gATOMS temp\n')
@@ -1176,8 +1296,8 @@ def write_lammps_data_input(cnf_xyz, mols, margin, charge_ratio, is_separate, is
   # MSD
   fi.write('#compute cMSD all msd\n')
   fi.write('#fix fMSD all ave/time 1 1 ${vNDUMP} c_cMSD[1] c_cMSD[2] c_cMSD[3] c_cMSD[4] file lammps.msd\n')
-  for (nb, mol, ff_) in mols:
-    group_name = mol.name.upper().replace('+', '').replace('-', '')
+  for specie in species:
+    group_name = specie.mol.name.upper().replace('+', '').replace('-', '')
     fi.write('#compute cMSD%s g%s msd\n' % (group_name, group_name))
     fi.write('#fix fMSD%s all ave/time 1 1 ${vNDUMP} c_cMSD%s[1] c_cMSD%s[2] c_cMSD%s[3] c_cMSD%s[4] file %s_lammps.msd\n' % ((group_name, ) * 6))
   fi.write('\n')
@@ -1189,12 +1309,8 @@ def write_lammps_data_input(cnf_xyz, mols, margin, charge_ratio, is_separate, is
 
   # Fix
   if is_polar:
-    fi.write('fix fSPECIAL all special/drude\n')
-    fi.write('fix fLANG all langevin/drude ${vTEMP} 100.0 200611 ${vTEMP_D} 20.0 260514\n')
+    fi.write('fix fLANG all langevin/drude ${vTEMP} 100.0 200611 ${vTEMP_D} 20.0 260514 zero yes\n')
     fi.write('fix fNPH all nph iso ${vPRESS} ${vPRESS} 500.0\n')
-    fi.write('\n')
-    fi.write('fix fMOMENTUM all momentum 100 linear 1 1 1\n')
-    fi.write('fix fRECENTER all recenter INIT INIT INIT\n')
   else:
     fi.write('fix fNPT all npt temp ${vTEMP} ${vTEMP} 100.0 iso ${vPRESS} ${vPRESS} 500\n')
   fi.write('\n')
@@ -1227,36 +1343,36 @@ def write_lammps_data_input(cnf_xyz, mols, margin, charge_ratio, is_separate, is
       # Detect charge changes
       fix_lines = []
       i = 0
-      for (atom_type, ff_, fr, to) in atom_types:
+      for atom_type in atom_types:
         i += 1
         # 0 : no dummy, 1 : dummy (D-), 2 : todummy (-D), 3 : transform
-        if fr is None and to is None:
+        if atom_type.fr is None and atom_type.to is None:
           continue
-        elif fr is not None and to is not None:
+        elif atom_type.fr is not None and atom_type.to is not None:
           dummy = 3
-          name = atom_type + '_' + to
-        elif fr is not None:
+          name = atom_type.name + '_' + atom_type.to
+        elif atom_type.fr is not None:
           dummy = 1
-          name = atom_type + '_D'
+          name = atom_type.name + '_D'
         else:
           dummy = 2
-          name = 'D_' + atom_type
+          name = 'D_' + atom_type.name
 
         if is_reverse_free:
           if dummy == 1:
-            name = 'D_' + atom_type
+            name = 'D_' + atom_type.name
           elif dummy == 2:
-            name = atom_type + '_D'
+            name = atom_type.name + '_D'
           elif dummy == 3:
-            name = to + '_' + atom_type
+            name = atom_type.to + '_' + atom_type.name
 
-        charge = ff_.atoms[atom_type].charge*charge_ratio
+        charge = atom_type.charge*charge_ratio
         if dummy == 1:
           fi.write('variable vQ%-5s equal %.3f*(1.0-v_vLAMBDA)\n' % (name, charge))
         elif dummy == 2:
           fi.write('variable vQ%-5s equal %.3f*v_vLAMBDA\n' % (name, charge))
         elif dummy == 3:
-          to_charge = ff_.atoms[to].charge*charge_ratio
+          to_charge = atom_type.ff.atoms[atom_type.to].charge*charge_ratio
           fi.write('variable vQ%-5s equal %.3f*v_vLAMBDA+(%.3f*(1.0-v_vLAMBDA))\n' % (name, to_charge, charge))
         fix_lines.append('atom charge %d v_vQ%s' % (i, name))
 
@@ -1305,37 +1421,37 @@ def write_lammps_data_input(cnf_xyz, mols, margin, charge_ratio, is_separate, is
     # Detect charge changes
     comp_lines = []
     i = 0
-    for (atom_type, ff_, fr, to) in atom_types:
+    for atom_type in atom_types:
       i += 1
       # 0 : no dummy, 1 : dummy (D-), 2 : todummy (-D), 3 : transform
-      if fr is None and to is None:
+      if atom_type.fr is None and atom_type.to is None:
         continue
-      elif fr is not None and to is not None:
+      elif atom_type.fr is not None and atom_type.to is not None:
         dummy = 3
-        name = atom_type + '_' + to
-      elif fr is not None:
+        name = atom_type.name + '_' + atom_type.to
+      elif atom_type.fr is not None:
         dummy = 1
-        name = atom_type + '_D'
+        name = atom_type.name + '_D'
       else:
         dummy = 2
-        name = 'D_' + atom_type
+        name = 'D_' + atom_type.name
 
       if is_reverse_free:
         if dummy == 1:
-          name = 'D_' + atom_type
+          name = 'D_' + atom_type.name
         elif dummy == 2:
-          name = atom_type + '_D'
+          name = atom_type.name + '_D'
         elif dummy == 3:
-          name = to + '_' + atom_type
+          name = atom_type.to + '_' + atom_type.name
 
-      charge = ff_.atoms[atom_type].charge*charge_ratio
+      charge = atom_type.charge*charge_ratio
       if free_type == 'bar':
         if dummy == 1:
           fi.write('variable vDQ%-5s equal %.3f*(1.0-v_vDLAMBDA)\n' % (name, charge))
         elif dummy == 2:
           fi.write('variable vDQ%-5s equal %.3f*v_vDLAMBDA\n' % (name, charge))
         elif dummy == 3:
-          to_charge = ff_.atoms[to].charge*charge_ratio
+          to_charge = atom_type.ff.atoms[atom_type.to].charge*charge_ratio
           fi.write('variable vDQ%-5s equal %.3f*v_vDLAMBDA+(%.3f*(1.0-v_vDLAMBDA))\n' % (name, to_charge, charge))
       else:
         if dummy == 1:
@@ -1343,7 +1459,7 @@ def write_lammps_data_input(cnf_xyz, mols, margin, charge_ratio, is_separate, is
         elif dummy == 2:
           fi.write('variable vDQ%-5s equal %.3f*v_vDLAMBDA\n' % (name, charge))
         elif dummy == 3:
-          to_charge = ff_.atoms[to].charge*charge_ratio
+          to_charge = atom_type.ff.atoms[atom_type.to].charge*charge_ratio
           fi.write('variable vDQ%-5s equal %.3f*v_vDLAMBDA-(%.3f*v_vDLAMBDA)\n' % (name, to_charge, charge))
       comp_lines.append('atom charge %d v_vDQ%s' % (i, name))
 
@@ -1383,12 +1499,9 @@ def write_lammps_data_input(cnf_xyz, mols, margin, charge_ratio, is_separate, is
 
 
   # Dump
-  if is_polar:
-    fi.write('dump dCONF all custom ${vNDUMP} dump.lammpstrj id mol type element x y z ix iy iz xu yu zu c_cEXTRA[1] c_cEXTRA[2]\n')
-  else:
-    fi.write('dump dCONF all custom ${vNDUMP} dump.lammpstrj id mol type element x y z ix iy iz xu yu zu\n')
+  fi.write('dump dCONF all custom ${vNDUMP} dump.lammpstrj id mol type element x y z ix iy iz xu yu zu\n')
 
-  fi.write('dump_modify dCONF element %s\n' % ' '.join([element.name2symbol(atom_type) for (atom_type, ff_, fr, to) in atom_types] + ['D'] * nb_drude_types))
+  fi.write('dump_modify dCONF element %s\n' % ' '.join([element.name2symbol(atom_type.name) for atom_type in atom_types] + ['D'] * len(polar_atom_types)))
   fi.write('\n')
 
   if is_polar:
@@ -1408,10 +1521,9 @@ def write_lammps_data_input(cnf_xyz, mols, margin, charge_ratio, is_separate, is
   # ATOMS
   i = 1
   m = 1
-  druded_i = []
-  for (nb, mol, ff_) in mols:
-    for _ in xrange(nb):
-      for atom in mol.atoms:
+  for specie in species:
+    for _ in xrange(specie.nb):
+      for atom in specie.mol.atoms:
         if 'fr' not in atom.fields:
           fr = None
         else:
@@ -1423,9 +1535,9 @@ def write_lammps_data_input(cnf_xyz, mols, margin, charge_ratio, is_separate, is
 
         # Put charge of the to if reverse
         if is_reverse_free and 'to' in atom.fields and atom.to is not None:
-          charge = ff_.atoms[atom.to].charge*charge_ratio
+          charge = specie.ff.atoms[atom.to].charge*charge_ratio
         else:
-          charge = ff_.atoms[atom.name].charge*charge_ratio
+          charge = specie.ff.atoms[atom.name].charge*charge_ratio
 
         # No charge for dummy atoms
         if not is_reverse_free:
@@ -1462,44 +1574,38 @@ def write_lammps_data_input(cnf_xyz, mols, margin, charge_ratio, is_separate, is
 
         atom_in_conf = cnf_xyz.atoms[i - 1]
 
-        if atom.name in druded_atom_types:
-          mass = ff_.atoms[atom.name].mass - drude_m
+        if atom.name in polar_atom_names:
+          mass = specie.ff.atoms[atom.name].mass - drude_m
           # 332.07 is (1/4PI.E0) in real units
           drude_q = math.sqrt(2.0 * drude_k * abs(ff_.atoms[atom.name].polarizability) / 332.07)
-          if (ff_.atoms[atom.name].polarizability < 0):
+          if specie.ff.atoms[atom.name].polarizability < 0:
             drude_q = -drude_q
           i = data.add_atom(atom_in_conf['x'], atom_in_conf['y'], atom_in_conf['z'], m, charge - drude_q, mass, atom.name)
-          druded_i.append(i)
-          data.add_extra(('%4d', '%7d'), (1, nb_atoms + len(druded_i)), comment)
         else:
-          mass = ff_.atoms[atom.name].mass
+          mass = specie.ff.atoms[atom.name].mass
           data.add_atom(atom_in_conf['x'], atom_in_conf['y'], atom_in_conf['z'], m, charge, mass, comment)
-          if is_polar:
-            data.add_extra(('%4d', '%7d'), (0, 0), comment)
         i += 1
       m += 1
 
   # Add drudes
   m = 1
   i_cnf = 1
-  for (nb, mol, ff_) in mols:
-    for _ in xrange(nb):
-      for atom in mol.atoms:
+  for specie in species:
+    for _ in xrange(specie.nb):
+      for atom in specie.mol.atoms:
         atom_in_conf = cnf_xyz.atoms[i_cnf - 1]
 
-        if atom.name in druded_atom_types:
+        if atom.name in polar_atom_names:
           name = 'D_%s' % atom.name
           mass = drude_m
           # 332.07 is (1/4PI.E0) in real units
           drude_q = math.sqrt(2.0 * drude_k * abs(ff_.atoms[atom.name].polarizability) / 332.07)
-          if (ff_.atoms[atom.name].polarizability < 0):
+          if specie.ff.atoms[atom.name].polarizability < 0:
             drude_q = -drude_q
-          comment = name
           x = atom_in_conf['x'] + random.gauss(0.0, 0.05)
           y = atom_in_conf['y'] + random.gauss(0.0, 0.05)
           z = atom_in_conf['z'] + random.gauss(0.0, 0.05)
           data.add_atom(x, y, z, m, drude_q, mass, name)
-          data.add_extra(('%4d', '%7d'), (2, druded_i.pop(0)), comment)
           i += 1
         i_cnf += 1
       m += 1
@@ -1507,86 +1613,79 @@ def write_lammps_data_input(cnf_xyz, mols, margin, charge_ratio, is_separate, is
   # BONDS
   if nb_bonds + nb_drudes:
     prev_nb = 0
-    for (nb, mol, ff_) in mols:
-      for _ in xrange(nb):
-        for (atom1, atom2) in mol.get_all_bonds():
+    for specie in species:
+      for _ in xrange(specie.nb):
+        for (atom1, atom2) in specie.mol.get_all_bonds():
           # Skip discard stuff
-          if ((atom1.name, atom2.name), ff_) in discard_bonds or ((atom2.name, atom1.name), ff_) in discard_bonds:
+          if ((atom1.name, atom2.name), specie.ff) in discard_bonds or ((atom2.name, atom1.name), specie.ff) in discard_bonds:
             continue
-          comment = '%s-%s' % (atom1.name, atom2.name)
-          data.add_bond((prev_nb + atom1.i, prev_nb + atom2.i), comment, atom_names=(atom1.name, atom2.name))
-        prev_nb += len(mol.atoms)
+          data.add_bond((prev_nb + atom1.i, prev_nb + atom2.i), 'auto', atom_names=(atom1.name, atom2.name))
+        prev_nb += len(specie.mol.atoms)
 
     # Add drudes bonds
     i_cnf = 1
     nb_taken_drudes = 0
-    for (nb, mol, ff_) in mols:
-      for _ in xrange(nb):
-        for atom in mol.atoms:
-          if atom.name in druded_atom_types:
+    for specie in species:
+      for _ in xrange(specie.nb):
+        for atom in specie.mol.atoms:
+          if atom.name in polar_atom_names:
             nb_taken_drudes += 1
-            comment = '%s-%s' % (atom.name, 'D_%s' % atom.name)
-            data.add_bond((i_cnf, nb_atoms + nb_taken_drudes), comment, atom_names=(atom.name, 'D_%s' % atom.name))
+            data.add_bond((i_cnf, nb_atoms + nb_taken_drudes), 'auto', atom_names=(atom.name, 'D_%s' % atom.name))
           i_cnf += 1
 
   # ANGLES
   if nb_angles:
     prev_nb = 0
-    for (nb, mol, ff_) in mols:
-      for _ in xrange(nb):
-        for (atom1, atom2, atom3) in mol.get_all_angles():
+    for specie in species:
+      for _ in xrange(specie.nb):
+        for (atom1, atom2, atom3) in specie.mol.get_all_angles():
           # Skip discard stuff
-          if ((atom1.name, atom2.name, atom3.name), ff_) in discard_angles or ((atom3.name, atom2.name, atom1.name), ff_) in discard_angles:
+          if ((atom1.name, atom2.name, atom3.name), specie.ff) in discard_angles or ((atom3.name, atom2.name, atom1.name), specie.ff) in discard_angles:
             continue
-          comment = '%s-%s-%s' % (atom1.name, atom2.name, atom3.name)
-          data.add_angle((prev_nb + atom1.i, prev_nb + atom2.i, prev_nb + atom3.i), comment, atom_names=(atom1.name, atom2.name, atom3.name))
-        prev_nb += len(mol.atoms)
+          data.add_angle((prev_nb + atom1.i, prev_nb + atom2.i, prev_nb + atom3.i), 'auto', atom_names=(atom1.name, atom2.name, atom3.name))
+        prev_nb += len(specie.mol.atoms)
 
 
   # DIHEDRALS AND IMPROPERS
   if is_separate:
     if nb_dihedrals:
       prev_nb = 0
-      for (nb, mol, ff_) in mols:
-        for _ in xrange(nb):
-          for (atom1, atom2, atom3, atom4) in mol.get_all_dihedrals():
+      for specie in species:
+        for _ in xrange(specie.nb):
+          for (atom1, atom2, atom3, atom4) in specie.mol.get_all_dihedrals():
             # Skip discard stuff
-            if ((atom1.name, atom2.name, atom3.name, atom4.name), ff_) in discard_dihedrals or ((atom4.name, atom3.name, atom2.name, atom1.name), ff_) in discard_dihedrals:
+            if ((atom1.name, atom2.name, atom3.name, atom4.name), specie.ff) in discard_dihedrals or ((atom4.name, atom3.name, atom2.name, atom1.name), specie.ff) in discard_dihedrals:
               continue
-            comment = '%s-%s-%s-%s' % (atom1.name, atom2.name, atom3.name, atom4.name)
-            data.add_dihedral((prev_nb + atom1.i, prev_nb + atom2.i, prev_nb + atom3.i, prev_nb + atom4.i), comment, atom_names=(atom1.name, atom2.name, atom3.name, atom4.name))
-          prev_nb += len(mol.atoms)
+            data.add_dihedral((prev_nb + atom1.i, prev_nb + atom2.i, prev_nb + atom3.i, prev_nb + atom4.i), 'auto', atom_names=(atom1.name, atom2.name, atom3.name, atom4.name))
+          prev_nb += len(specie.mol.atoms)
 
     if nb_impropers:
       prev_nb = 0
-      for (nb, mol, ff_) in mols:
-        for _ in xrange(nb):
-          for (atom1, atom2, atom3, atom4) in mol.get_all_impropers():
+      for specie in species:
+        for _ in xrange(specie.nb):
+          for (atom1, atom2, atom3, atom4) in specie.mol.get_all_impropers():
             # Skip discard stuff
-            if ((atom1.name, atom2.name, atom3.name, atom4.name), ff_) in discard_impropers or ((atom4.name, atom3.name, atom2.name, atom1.name), ff_) in discard_impropers:
+            if ((atom1.name, atom2.name, atom3.name, atom4.name), specie.ff) in discard_impropers or ((atom4.name, atom3.name, atom2.name, atom1.name), specie.ff) in discard_impropers:
               continue
-            comment = '%s-%s-%s-%s' % (atom1.name, atom2.name, atom3.name, atom4.name)
-            data.add_improper((prev_nb + atom1.i, prev_nb + atom2.i, prev_nb + atom3.i, prev_nb + atom4.i), comment, atom_names=(atom1.name, atom2.name, atom3.name, atom4.name))
-          prev_nb += len(mol.atoms)
+            data.add_improper((prev_nb + atom1.i, prev_nb + atom2.i, prev_nb + atom3.i, prev_nb + atom4.i), 'auto', atom_names=(atom1.name, atom2.name, atom3.name, atom4.name))
+          prev_nb += len(specie.mol.atoms)
 
   else:
     if nb_dihedrals + nb_impropers:
       prev_nb = 0
-      for (nb, mol, ff_) in mols:
-        for _ in xrange(nb):
-          for (atom1, atom2, atom3, atom4) in mol.get_all_dihedrals():
+      for specie in species:
+        for _ in xrange(specie.nb):
+          for (atom1, atom2, atom3, atom4) in specie.mol.get_all_dihedrals():
             # Skip discard stuff
-            if ((atom1.name, atom2.name, atom3.name, atom4.name), ff_) in discard_dihedrals or ((atom4.name, atom3.name, atom2.name, atom1.name), ff_) in discard_dihedrals:
+            if ((atom1.name, atom2.name, atom3.name, atom4.name), specie.ff) in discard_dihedrals or ((atom4.name, atom3.name, atom2.name, atom1.name), specie.ff) in discard_dihedrals:
               continue
-            comment = '%s-%s-%s-%s' % (atom1.name, atom2.name, atom3.name, atom4.name)
-            data.add_dihedral((prev_nb + atom1.i, prev_nb + atom2.i, prev_nb + atom3.i, prev_nb + atom4.i), comment, atom_names=(atom1.name, atom2.name, atom3.name, atom4.name))
-          for (atom1, atom2, atom3, atom4) in mol.get_all_impropers():
+            data.add_dihedral((prev_nb + atom1.i, prev_nb + atom2.i, prev_nb + atom3.i, prev_nb + atom4.i), 'auto', atom_names=(atom1.name, atom2.name, atom3.name, atom4.name))
+          for (atom1, atom2, atom3, atom4) in specie.mol.get_all_impropers():
             # Skip discard stuff
-            if ((atom1.name, atom2.name, atom3.name, atom4.name), ff_) in discard_impropers or ((atom4.name, atom3.name, atom2.name, atom1.name), ff_) in discard_impropers:
+            if ((atom1.name, atom2.name, atom3.name, atom4.name), specie.ff) in discard_impropers or ((atom4.name, atom3.name, atom2.name, atom1.name), specie.ff) in discard_impropers:
               continue
-            comment = '%s-%s-%s-%s' % (atom1.name, atom2.name, atom3.name, atom4.name)
-            data.add_dihedral((prev_nb + atom1.i, prev_nb + atom2.i, prev_nb + atom3.i, prev_nb + atom4.i), comment, atom_names=(atom1.name, atom2.name, atom3.name, atom4.name), is_improper=True)
-          prev_nb += len(mol.atoms)
+            data.add_dihedral((prev_nb + atom1.i, prev_nb + atom2.i, prev_nb + atom3.i, prev_nb + atom4.i), 'auto', atom_names=(atom1.name, atom2.name, atom3.name, atom4.name), is_improper=True)
+          prev_nb += len(specie.mol.atoms)
 
   data.write_to_file('data.lmp')
 
@@ -1634,7 +1733,7 @@ def main():
   except (IOError, ValueError, IndexError), e:
     print >> sys.stderr, 'Error reading CONFFILE %s : %s' % (args.conffile, e)
 
-  mols = []
+  species = []
 
   ##########
   # Check args validity and store in variables
@@ -1646,11 +1745,11 @@ def main():
     elif i % 3 == 1:
       if not args.args[i].endswith('.xyz'):
         parser.error('MOLFILE should be a .xyz file (not the case of %s)' % args.args[i])
+      is_fusion = False
       try:
-        is_fusion = False
-        if '/' in args.args[i]:
-          (arg1, arg2) = args.args[i].split('/')
-          mol1 = molecule.Molecule(arg1, 'xyz')
+        if '--' in args.args[i]:
+          (arg1, arg2) = args.args[i].split('--')
+          mol = molecule.Molecule(arg1, 'xyz')
           mol2 = molecule.Molecule(arg2, 'xyz')
           is_fusion = True
         else:
@@ -1663,23 +1762,26 @@ def main():
       except (IOError, ValueError), e:
         print >> sys.stderr, 'Error reading FORCEFIELD %s : %s' % (args.args[i], e)
         sys.exit(2)
+
       if is_fusion:
-        mol = mol1.fusion(mol2, ff_)
-      mols.append((nb, mol, ff_))
+        specie = Specie(nb, mol, ff_, mol2)
+      else:
+        specie = Specie(nb, mol, ff_)
+      species.append(specie)
 
   # Check the compatibility of the conf and the mols
   atoms_conf = [atom['name'] for atom in cnf_xyz.atoms]
   atoms_mols = []
-  for (nb, mol, ff_) in mols:
-    for _ in xrange(nb):
-      for atom in mol.atoms:
+  for specie in species:
+    for _ in xrange(specie.nb):
+      for atom in specie.mol.atoms:
         atoms_mols.append(atom.name)
   if atoms_conf != atoms_mols:
     print >> sys.stderr, 'CONFFILE and MOLFILE are not compatible in their atom names !'
     sys.exit(2)
 
   # Energy unit in all ff files should be the same
-  units = set([mol[2].energy_unit for mol in mols])
+  units = set([specie.ff.energy_unit for specie in species])
   if len(units) > 1:
     print >> sys.stderr, 'Incompatible energy units in forcefields %s' % units
     sys.exit(2)
@@ -1693,8 +1795,8 @@ def main():
       sys.exit(2)
 
     try:
-      write_dlpoly_field(cnf_xyz, mols, args.is_nonpatched, args.is_arithmetic)
-    except (ValueError, FatalError), e:
+      write_dlpoly_field(cnf_xyz, species, args.is_nonpatched, args.is_arithmetic)
+    except (ValueError, RuntimeError), e:
       print >> sys.stderr, 'Fatal error creating FIELD file: %s' % e
       sys.exit(2)
     print 'File FIELD written'
@@ -1705,7 +1807,7 @@ def main():
 
     try:
       write_dlpoly_config(cnf_xyz, args.margin)
-    except (ValueError, FatalError), e:
+    except (ValueError, RuntimeError), e:
       print >> sys.stderr, 'Fatal error creating CONFIG file: %s' % e
       sys.exit(2)
     print 'File CONFIG written'
@@ -1716,8 +1818,8 @@ def main():
       sys.exit(2)
 
     try:
-      write_lammps_data_input(cnf_xyz, mols, args.margin, args.charge_ratio, args.is_separate, args.is_arithmetic, args.is_polar, args.drude_k, args.drude_m, args.free_type)
-    except (ValueError, FatalError), e:
+      write_lammps_data_input(cnf_xyz, species, args.margin, args.charge_ratio, args.is_separate, args.is_arithmetic, args.is_polar, args.drude_k, args.drude_m, args.free_type)
+    except (ValueError, RuntimeError), e:
       print >> sys.stderr, 'Fatal error creating LAMMPS file: %s' % e
       sys.exit(2)
     print 'Files data.lmp and in.lmp written'

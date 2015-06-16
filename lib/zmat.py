@@ -1,8 +1,8 @@
 # -*- coding: iso-8859-1 -*-
-'''Python library to manage mol files'''
+'''Python library to manage mol or zmat files'''
 
-class Mol(object):
-  '''Class representing a mol file'''
+class ZMat(object):
+  '''Class representing a mol/zmat file'''
 
   def __init__(self, filename):
 
@@ -140,6 +140,6 @@ class Mol(object):
       raise Exception('Not a valid .mol/.zmat file: %s' % e)
 
   def __str__(self):
-    return 'MOL %s(%s)' \
+    return 'ZMAT %s(%s)' \
       % (self.filename, self.name)
 

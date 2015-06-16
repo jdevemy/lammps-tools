@@ -63,41 +63,49 @@ class Data(object):
     else:
       self.filename = None
 
-  def add_atom_type(self, mass, coeffs, comment):
+  def add_atom_type(self, mass, coeffs, comment=None, drude_type=None):
     '''Add an atom type to the end of the list'''
 
     i = len(self.atom_types) + 1
-    atom_type = {'i': i, 'mass': mass, 'coeffs': coeffs, 'comment': comment}
+    atom_type = {'i': i, 'mass': mass, 'coeffs': coeffs, 'comment': comment, 'drude_type': drude_type}
     self.atom_types.append(atom_type)
     return i
 
-  def add_bond_type(self, coeffs, comment, atom_names=None):
+  def add_bond_type(self, coeffs, comment=None, atom_names=None):
     '''Add a bond type to the end of the list'''
 
+    if comment == 'auto':
+      comment = '-'.join(atom_names)
     i = len(self.bond_types) + 1
     bond_type = {'i': i, 'atom_names': atom_names, 'coeffs': coeffs, 'comment': comment}
     self.bond_types.append(bond_type)
     return i
 
-  def add_angle_type(self, coeffs, comment, atom_names=None):
+  def add_angle_type(self, coeffs, comment=None, atom_names=None):
     '''Add an angle type to the end of the list'''
 
+    if comment == 'auto':
+      comment = '-'.join(atom_names)
     i = len(self.angle_types) + 1
     angle_type = {'i': i, 'atom_names': atom_names, 'coeffs': coeffs, 'comment': comment}
     self.angle_types.append(angle_type)
     return i
 
-  def add_dihedral_type(self, coeffs, comment, style=None, atom_names=None, is_improper=False):
+  def add_dihedral_type(self, coeffs, comment=None, style=None, atom_names=None, is_improper=False):
     '''Add a dihedral type to the end of the list'''
 
+    if comment == 'auto':
+      comment = '-'.join(atom_names)
     i = len(self.dihedral_types) + 1
     dihedral_type = {'i': i, 'atom_names': atom_names, 'coeffs': coeffs, 'comment': comment, 'style': style, 'is_improper': is_improper}
     self.dihedral_types.append(dihedral_type)
     return i
 
-  def add_improper_type(self, coeffs, comment, atom_names=None):
+  def add_improper_type(self, coeffs, comment=None, atom_names=None):
     '''Add a improper type to the end of the list'''
 
+    if comment == 'auto':
+      comment = '-'.join(atom_names)
     i = len(self.improper_types) + 1
     improper_type = {'i': i, 'atom_names': atom_names, 'coeffs': coeffs, 'comment': comment}
     self.improper_types.append(improper_type)
@@ -138,13 +146,24 @@ class Data(object):
       right_bond_type = None
       # Search for the right type
       for bond_type in self.bond_types:
-        if bond_type['atom_names'] == atom_names or bond_type['atom_names'] == (atom_names[1], atom_names[0]):
+        if bond_type['atom_names'] == atom_names:
           right_bond_type = bond_type
+          is_reverse = False
+          break
+        if bond_type['atom_names'] == (atom_names[1], atom_names[0]):
+          right_bond_type = bond_type
+          is_reverse = True
           break
       if right_bond_type is None:
         raise ValueError('Bond type not found for bond %s' % comment)
     else:
       right_bond_type = bond_type
+
+    if comment == 'auto':
+      if is_reverse:
+        comment = '-'.join(reversed(right_bond_type['atom_names']))
+      else:
+        comment = '-'.join(right_bond_type['atom_names'])
 
     atom1 = self.atoms[atom_is[0] - 1]
     atom2 = self.atoms[atom_is[1] - 1]
@@ -168,8 +187,13 @@ class Data(object):
       right_angle_type = None
       # Search for the right type
       for angle_type in self.angle_types:
-        if angle_type['atom_names'] == atom_names or angle_type['atom_names'] == (atom_names[2], atom_names[1], atom_names[0]):
+        if angle_type['atom_names'] == atom_names:
           right_angle_type = angle_type
+          is_reverse = False
+          break
+        if angle_type['atom_names'] == (atom_names[2], atom_names[1], atom_names[0]):
+          right_angle_type = angle_type
+          is_reverse = True
           break
 
       if right_angle_type is None:
@@ -180,6 +204,12 @@ class Data(object):
     atom1 = self.atoms[atom_is[0] - 1]
     atom2 = self.atoms[atom_is[1] - 1]
     atom3 = self.atoms[atom_is[2] - 1]
+
+    if comment == 'auto':
+      if is_reverse:
+        comment = '-'.join(reversed(right_angle_type['atom_names']))
+      else:
+        comment = '-'.join(right_angle_type['atom_names'])
 
     if i is None:
       i = len(self.angles) + 1
@@ -200,10 +230,15 @@ class Data(object):
       right_dihedral_type = None
       # Search for the right type
       for dihedral_type in self.dihedral_types:
-        if (dihedral_type['atom_names'] == atom_names or dihedral_type['atom_names'] == (atom_names[3], atom_names[2], atom_names[1], atom_names[0])) and \
-           dihedral_type['is_improper'] == is_improper:
-          right_dihedral_type = dihedral_type
-          break
+        if dihedral_type['is_improper'] == is_improper:
+          if dihedral_type['atom_names'] == atom_names:
+            right_dihedral_type = dihedral_type
+            is_reverse = False
+            break
+          if dihedral_type['atom_names'] == (atom_names[3], atom_names[2], atom_names[1], atom_names[0]):
+            right_dihedral_type = dihedral_type
+            is_reverse = True
+            break
 
       if right_dihedral_type is None:
         raise ValueError('Dihedral type not found for dihedral %s' % comment)
@@ -214,6 +249,12 @@ class Data(object):
     atom2 = self.atoms[atom_is[1] - 1]
     atom3 = self.atoms[atom_is[2] - 1]
     atom4 = self.atoms[atom_is[3] - 1]
+
+    if comment == 'auto':
+      if is_reverse:
+        comment = '-'.join(reversed(right_dihedral_type['atom_names']))
+      else:
+        comment = '-'.join(right_dihedral_type['atom_names'])
 
     if i is None:
       i = len(self.dihedrals) + 1
@@ -247,6 +288,9 @@ class Data(object):
     atom2 = self.atoms[atom_is[1] - 1]
     atom3 = self.atoms[atom_is[2] - 1]
     atom4 = self.atoms[atom_is[3] - 1]
+
+    if comment == 'auto':
+      comment = '-'.join(right_improper_type['atom_names'])
 
     if i is None:
       i = len(self.impropers) + 1
@@ -308,7 +352,8 @@ class Data(object):
 
       # Section change
       if keyword == 'Masses' or keyword == 'Pair Coeffs' or keyword == 'Bond Coeffs' or keyword == 'Angle Coeffs' or keyword == 'Dihedral Coeffs' or keyword == 'Improper Coeffs' or \
-         keyword == 'Atoms' or keyword == 'Bonds' or keyword == 'Angles' or keyword == 'Dihedrals' or keyword == 'Impropers' or keyword == 'Velocities' or keyword == 'Extras' or keyword == 'EXTRA':
+         keyword == 'Atoms' or keyword == 'Bonds' or keyword == 'Angles' or keyword == 'Dihedrals' or keyword == 'Impropers' or keyword == 'Velocities' or \
+         keyword == 'Drude Types' or keyword == 'Extras' or keyword == 'EXTRA':
         section = keyword
         continue
 
@@ -390,6 +435,18 @@ class Data(object):
 
         atom_type = self.atom_types[i - 1]
         atom_type['coeffs'] = coeffs
+
+      # Drude Types
+      if section == 'Drude Types':
+        i = int(line.split()[0])
+        # Get all float coeffs
+        try:
+          drude_type = int(line.split()[1])
+        except ValueError:
+          break
+
+        atom_type = self.atom_types[i - 1]
+        atom_type['drude type'] = drude_type
 
       # Bond Coeffs
       if section == 'Bond Coeffs':
@@ -550,7 +607,7 @@ class Data(object):
         extra = line.split(None, 1)[1]
         if '#' in line:
           extra = extra.split('#')[0].strip()
-        extras = [ float(e) for e in extra.split() ]
+        extras = [float(e) for e in extra.split()]
         self.atoms[i-1]['extras'] = tuple(extras)
 
     f.close()
@@ -674,6 +731,18 @@ class Data(object):
           f.write('%4d %s # %s\n' % (i, coeffs_str, atom_type['comment']))
         else:
           f.write('%4d %s\n' % (i, coeffs_str))
+      f.write('\n')
+
+    # Drude Types
+    if None not in [atom_type['drude_type'] for atom_type in self.atom_types]:
+      f.write('Drude Types\n\n')
+      i = 0
+      for atom_type in self.atom_types:
+        i += 1
+        if 'comment' in atom_type and atom_type['comment'] is not None:
+          f.write('%4d %4d # %s\n' % (i, atom_type['drude_type'], atom_type['comment']))
+        else:
+          f.write('%4d %4d\n' % (i, atom_type['drude_type']))
       f.write('\n')
 
     # Bond Coeffs
@@ -816,11 +885,17 @@ class Log(object):
     # Default is read only one run
     self.nb_runs = 1
 
+    self.last_line = False
+
     self.steps = 0
 
     self.is_multi = False
 
-    self.cache_lines = []
+    # Temp values
+    self.next_step = None
+    self.next_cpu = None
+
+    self.fields = []
 
     # Try first gzip and fall back to normal if failed
     try:
@@ -844,6 +919,148 @@ class Log(object):
     if self.run == 0:
       self.seek_next_run()
 
+  def __iter__(self):
+    return self
+
+  def next(self):
+    '''The iterator method, returns a dict conf containing all infos of the
+       current configuration'''
+
+    stats = {}
+
+    if self.run == 0:
+      stats['run'] = self.nb_runs
+    else:
+      stats['run'] = self.run
+
+    if not self.is_multi:
+
+      line = self.f.readline()
+      if line == '':
+        raise StopIteration
+      if line.startswith('Loop'):
+        if self.run == 0:
+          self.seek_next_run(True)
+          return self.next()
+        else:
+          raise StopIteration
+      values = line.split()
+
+      # Skip SHAKE lines
+      while 'SHAKE' in line or len(values) != len(self.fields):
+        line = self.f.readline()
+        if line == '':
+          raise StopIteration
+        if line.startswith('Loop'):
+          if self.run == 0:
+            self.seek_next_run(True)
+            return self.next()
+          else:
+            raise StopIteration
+        values = line.split()
+
+      for (field, value) in zip(self.fields, values):
+        # Special case for int values
+        if field in ('step', 'elapsed'):
+          stats[field] = int(value)
+        else:
+          stats[field] = float(value)
+    else:
+      if self.last_line:
+        raise StopIteration
+
+      # Multi lines version
+      stats['step'] = self.next_step
+      stats['cpu'] = self.next_cpu
+
+      line = self.f.readline()
+      if line == '':
+        raise StopIteration
+      values = line.split()
+      # Get all the data in format: Field = Value
+      while len(values) > 2 and values[1] == '=':
+        # For each line, get the infos (line format: Field = Value)
+        field = None
+        for value in values:
+          if value == '=':
+            continue
+          if field is None:
+            field = value
+          else:
+            stats[field.lower()] = float(value)
+            field = None
+        line = self.f.readline()
+        values = line.split()
+
+      # Remove volume for NVT
+      if 'volume' in self.fields and 'volume' not in stats:
+        self.fields.remove('volume')
+
+      # Try to get the next record
+      while not line.startswith('-----') and line != '' and not line.startswith('Memory usage per processor'):
+        line = self.f.readline()
+
+      # Reach next log
+      if line.startswith('Memory usage per processor'):
+        if self.run == 0:
+          self.seek_next_run(True, line=line)
+        else:
+          # It's over, but at next next
+          self.last_line = True
+
+      if line == '':
+        self.last_line = True
+
+      # We reach the first line of the next record
+      if line.startswith('-----'):
+        values = line.split()
+        try:
+          self.next_step = int(values[2])
+          self.next_cpu = float(values[6])
+        except IndexError:
+          self.last_line = True
+
+    return stats
+
+  def to_array(self):
+    '''Convert the log to a numpy array'''
+
+    try:
+      nb_fields = len(self.fields)
+      types = zip(self.fields, [float] * nb_fields)
+      return np.array([tuple([line[field] for field in self.fields]) for line in self], dtype=types)
+    except ValueError:
+      # It's NVT in fact, retry, volume has been already removed !
+      nb_fields = len(self.fields)
+      types = zip(self.fields, [float] * nb_fields)
+      return np.array([tuple([line[field] for field in self.fields]) for line in self], dtype=types)
+
+  def seek_next_run(self, is_multi_run=False, line=None):
+    '''Seek to next run'''
+
+    if not line:
+      line = self.f.readline()
+    while not line.startswith('Memory usage per processor'):
+      line = self.f.readline()
+      # Get and store steps (if int)
+      if line.startswith('run'):
+        try:
+          self.steps = int(line.split()[1])
+        except ValueError:
+          pass
+      # If EOF
+      if line == '':
+        if is_multi_run:
+          raise StopIteration
+        elif self.run != 1 and self.run != 0:
+          raise ValueError('File %s does not seem to be a valid LAMMPS log file (with thermo infos) or does not contain info for run %d' % (self.filename, self.run))
+        else:
+          raise ValueError('File %s does not seem to be a valid LAMMPS log file (with thermo infos)' % self.filename)
+
+    if is_multi_run:
+      self.nb_runs += 1
+
+    # Read the header to store in fields
     line = self.f.readline()
     if not line.startswith('-----'):
       tmp_fields = [field.lower() for field in line.split()]
@@ -862,169 +1079,9 @@ class Log(object):
       self.next_step = int(line.split()[2])
       self.next_cpu = float(line.split()[6])
       self.is_multi = True
-      self.fields = ['step', 'cpu']
+      # Suppose it's NPT (volume is here), we'll remove it after
+      self.fields = ['step', 'cpu', 'toteng', 'kineng', 'temp', 'poteng', 'e_bond', 'e_angle', 'e_dihed', 'e_impro', 'e_vdwl', 'e_coul', 'e_long', 'press', 'volume']
 
-      # For multi lines, fields should be get from the first record (with lines put in cache for the first read !)
-      line = self.f.readline()
-      # Put line in cache
-      self.cache_lines.append(line)
-      while not line.startswith('-----') and line != '' and not line.startswith('Memory usage per processor'):
-        fields = line.split()
-        # Get all the data in format: Field = Value
-        # For each line, get the infos (line format: Field = Value)
-        is_first = True
-        for field in fields:
-          if field == '=':
-            continue
-          # Get fields from left side
-          elif is_first:
-            if field not in self.fields:
-              self.fields.append(field.lower())
-            is_first = False
-          else:
-            is_first = True
-        line = self.f.readline()
-        # Put line in cache
-        self.cache_lines.append(line)
-
-  def __iter__(self):
-    return self
-
-  def next(self):
-    '''The iterator method, returns a dict conf containing all infos of the
-       current configuration'''
-
-    stats = {}
-
-    if self.run == 0:
-      stats['run'] = self.nb_runs
-    else:
-      stats['run'] = self.run
-
-    if not self.is_multi:
-      # One line version
-      line = self.f.readline()
-      values = line.split()
-      if line == '':
-        raise StopIteration
-      if line.startswith('Loop'):
-        if self.run == 0:
-          self.seek_next_run(True)
-          return self.next()
-        else:
-          raise StopIteration
-
-      # Skip garbage
-      while len(values) != len(self.fields):
-        line = self.f.readline()
-        values = line.split()
-        if line == '':
-          raise StopIteration
-        if line.startswith('Loop'):
-          if self.run == 0:
-            self.seek_next_run(True)
-            return self.next()
-          else:
-            raise StopIteration
-
-      for (field, value) in zip(self.fields, values):
-        # Special case for int values
-        if field in ('step', 'elapsed'):
-          stats[field] = int(value)
-        else:
-          stats[field] = float(value)
-    else:
-      # Multi lines version
-      stats['step'] = self.next_step
-      stats['cpu'] = self.next_cpu
-
-      if len(self.cache_lines):
-        line = self.cache_lines.pop(0)
-      else:
-        line = self.f.readline()
-      if line == '':
-        raise StopIteration
-      values = line.split()
-      # Get all the data in format: Field = Value
-      while len(values) > 2 and values[1] == '=':
-        # For each line, get the infos (line format: Field = Value)
-        field = None
-        for value in values:
-          if value == '=':
-            continue
-          if field is None:
-            field = value
-          else:
-            stats[field.lower()] = float(value)
-            field = None
-        if len(self.cache_lines):
-          line = self.cache_lines.pop(0)
-        else:
-          line = self.f.readline()
-        values = line.split()
-
-      # Try to get the next record
-      while not line.startswith('-----') and line != '' and not line.startswith('Memory usage per processor'):
-        if len(self.cache_lines):
-          line = self.cache_lines.pop(0)
-        else:
-          line = self.f.readline()
-
-      # Reach next log
-      if line.startswith('Memory usage per processor'):
-        if self.run == 0:
-          self.seek_next_run(True)
-          return self.next()
-        else:
-          raise StopIteration
-
-      # We reach the first line of the next record
-      if line.startswith('-----'):
-        values = line.split()
-        try:
-          self.next_step = int(values[2])
-          self.next_cpu = float(values[6])
-        except IndexError:
-          if self.run == 0:
-            self.seek_next_run(True)
-            return self.next()
-          else:
-            raise StopIteration
-
-    return stats
-
-  def to_array(self):
-    '''Convert the log to a numpy array'''
-
-    nb_fields = len(self.fields)
-    types = zip(self.fields, [float] * nb_fields)
-    return np.array([tuple([line[field] for field in self.fields]) for line in self], dtype=types)
-
-  def seek_next_run(self, is_multi_run=False):
-    '''Seek to next run'''
-
-    line = self.f.readline()
-    while not line.startswith('Memory usage per processor'):
-      line = self.f.readline()
-      # Get and store steps (if int)
-      if line.startswith('run'):
-        try:
-          self.steps = int(line.split()[1])
-        except ValueError:
-          pass
-      # If EOF
-      if line == '':
-        if is_multi_run:
-          raise StopIteration
-        elif self.run != 1 and self.run != 0:
-          raise ValueError('File %s does not seem to be a valid LAMMPS log file (with thermo infos) or does not contain info for run %d' % (self.filename, self.run))
-        else:
-          raise ValueError('File %s does not seem to be a valid LAMMPS log file (with thermo infos)' % self.filename)
-
-    # Skip the header if not useful
-    if is_multi_run:
-      self.f.readline()
-      self.nb_runs += 1
 
 class Dump(object):
   '''Class representing a Dump file reader'''
